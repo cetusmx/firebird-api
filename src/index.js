@@ -150,6 +150,8 @@ app.get('/existencias', async (req, res) => {
       EXIST
     FROM
       MULT02
+    WHERE
+      CVE_ALM IN (1, 6)
     ORDER BY
       CVE_ART, CVE_ALM;
   `;
