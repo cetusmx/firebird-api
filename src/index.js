@@ -53,24 +53,37 @@ app.get('/productos-detallado', async (req, res) => {
       T1.ULT_COSTO,
       T1.STATUS,
       T1.CVE_UNIDAD,
-      SUM(CASE WHEN T2.CVE_ALM IN (1, 6) THEN T2.EXIST ELSE 0 END) AS EXISTENCIA,
-      MAX(CASE WHEN T3.CVE_PRECIO = 1 THEN T3.PRECIO ELSE NULL END) AS PRECIO
+      -- Usamos COALESCE para asegurar que si no hay registros de stock, EXISTENCIA sea 0 en lugar de NULL
+      COALESCE(T2_AGGR.EXISTENCIA, 0) AS EXISTENCIA, 
+      T3_AGGR.PRECIO
     FROM
-      INVE02 T1
+      INVE01 T1
     LEFT JOIN
-      MULT02 T2 ON T1.CVE_ART = T2.CVE_ART
+      -- SUBQUERY 1: Agregación de Existencias (MULT02)
+      (
+        SELECT
+          CVE_ART,
+          SUM(EXIST) AS EXISTENCIA
+        FROM
+          MULT02
+        WHERE
+          CVE_ALM IN (1, 6) -- Filtrar SOLO almacenes 1 y 6
+        GROUP BY
+          CVE_ART
+      ) T2_AGGR ON T1.CVE_ART = T2_AGGR.CVE_ART
     LEFT JOIN
-      PRECIO_X_PROD02 T3 ON T1.CVE_ART = T3.CVE_ART
+      -- SUBQUERY 2: Extracción de Precio Específico (PRECIO_X_PROD02)
+      (
+        SELECT
+          CVE_ART,
+          PRECIO
+        FROM
+          PRECIO_X_PROD02
+        WHERE
+          CVE_PRECIO = 1 -- Filtrar SOLO el precio tipo 1
+      ) T3_AGGR ON T1.CVE_ART = T3_AGGR.CVE_ART
     WHERE
       T1.STATUS = 'A'
-    GROUP BY
-      T1.CVE_ART,
-      T1.DESCR,
-      T1.LIN_PROD,
-      T1.FCH_ULTCOM,
-      T1.ULT_COSTO,
-      T1.STATUS,
-      T1.CVE_UNIDAD
     ORDER BY
       T1.CVE_ART;
   `;
