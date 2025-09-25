@@ -57,7 +57,7 @@ app.get('/productos-detallado', async (req, res) => {
       COALESCE(T2_AGGR.EXISTENCIA, 0) AS EXISTENCIA, 
       T3_AGGR.PRECIO
     FROM
-      INVE01 T1
+      INVE02 T1
     LEFT JOIN
       -- SUBQUERY 1: Agregación de Existencias (MULT02)
       (
