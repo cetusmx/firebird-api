@@ -14,6 +14,46 @@ app.get('/', (req, res) => {
   res.send('API de solo lectura para Firebird está en funcionamiento!');
 });
 
+// src/index.js (Servidor 'Z' - Nuevo Endpoint /existencia-alm/:clave)
+
+// Endpoint para obtener la existencia de un producto por almacén
+app.get('/existenciaalm/:clave', async (req, res) => {
+  const { clave } = req.params;
+  
+  // Consulta SQL para obtener todos los registros de MULT02 para una clave específica
+  const sql = `
+    SELECT
+      CVE_ART,
+      CVE_ALM,
+      EXIST
+    FROM
+      MULT02
+    WHERE
+      CVE_ART = ?
+    ORDER BY
+      CVE_ALM;
+  `;
+
+  try {
+    // Nota: El conector node-firebird usa un array para los parámetros [clave]
+    const existencias = await db.query(sql, [clave]);
+
+    if (existencias.length === 0) {
+      // Devolvemos un 404 si el producto no tiene registros de existencia en MULT02
+      return res.status(404).json({ error: 'No se encontraron registros de existencia para la clave de producto especificada.' });
+    }
+    
+    // Devolvemos el array de existencias (una fila por almacén)
+    res.json(existencias); 
+  } catch (error) {
+    console.error('Error al ejecutar la consulta de existencia por almacén:', error);
+    res.status(500).json({ 
+        error: 'Error interno del servidor al consultar existencia por almacén.', 
+        detalles: error.message 
+    });
+  }
+});
+
 // Endpoint para obtener todos los productos
 app.get('/productos', async (req, res) => {
   const sql = 'SELECT * FROM PRODUCTOS';
