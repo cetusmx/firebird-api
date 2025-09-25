@@ -97,6 +97,73 @@ app.get('/productos-detallado', async (req, res) => {
   }
 });
 
+// src/index.js
+
+// ... (código anterior)
+
+// Nuevo Endpoint para obtener solo precios
+app.get('/precios', async (req, res) => {
+  // Opcional: Implementa paginación aquí también si tienes muchos precios
+  const limit = parseInt(req.query.limit) || 1000;
+  const offset = parseInt(req.query.offset) || 0;
+  
+  const sql = `
+    SELECT
+      CVE_ART,
+      PRECIO
+    FROM
+      PRECIO_X_PROD02
+    WHERE
+      CVE_PRECIO = 1
+    ORDER BY
+      CVE_ART;
+  `;
+  /* const sql = `
+    SELECT FIRST ${limit} SKIP ${offset}
+      CVE_ART,
+      PRECIO
+    FROM
+      PRECIO_X_PROD02
+    WHERE
+      CVE_PRECIO = 1
+    ORDER BY
+      CVE_ART;
+  `; */
+
+  try {
+    const precios = await db.query(sql);
+    res.json(precios);
+  } catch (error) {
+    console.error('Error al ejecutar la consulta de precios:', error);
+    // Dejamos un mensaje detallado para ayudar en la depuración si falla
+    res.status(500).json({ error: 'Error al consultar la base de datos para obtener los precios.', detalles: error.message });
+  }
+});
+
+
+// Nuevo Endpoint para obtener las existencias de MULT02
+app.get('/existencias', async (req, res) => {
+  const sql = `
+    SELECT
+      CVE_ART,
+      CVE_ALM,
+      EXIST
+    FROM
+      MULT02
+    ORDER BY
+      CVE_ART, CVE_ALM;
+  `;
+
+  try {
+    const existencias = await db.query(sql);
+    res.json(existencias);
+  } catch (error) {
+    console.error('Error al ejecutar la consulta de existencias:', error);
+    // Devolvemos el error detallado para ayudar en la depuración
+    res.status(500).json({ error: 'Error al consultar la base de datos para obtener las existencias.', detalles: error.message });
+  }
+});
+
 
 // Iniciar el servidor
 app.listen(port, () => {
