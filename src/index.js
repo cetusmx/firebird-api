@@ -29,42 +29,63 @@ app.get('/productos', async (req, res) => {
 app.get('/inventariocompleto/:clave', async (req, res) => {
   const { clave } = req.params;
   
-  // Consulta SQL COMPLEJA para obtener todos los campos de un solo producto
   const sql = `
     SELECT
       T1.CVE_ART,
       T1.DESCR,
       T1.FCH_ULTCOM,
       T1.ULT_COSTO,
-      SUM(CASE WHEN T2.CVE_ALM IN (1, 6) THEN T2.EXIST ELSE 0 END) AS EXISTENCIA,
-      MAX(CASE WHEN T3.CVE_PRECIO = 1 THEN T3.PRECIO ELSE NULL END) AS PRECIO
+      COALESCE(T2_AGGR.EXISTENCIA, 0) AS EXISTENCIA, -- Existencia de subconsulta
+      T3_AGGR.PRECIO -- Precio de subconsulta
     FROM
       INVE02 T1
     LEFT JOIN
-      MULT02 T2 ON T1.CVE_ART = T2.CVE_ART
+      -- SUBQUERY 1: AGREGACIÓN DE EXISTENCIAS (Garantiza 1 fila por producto)
+      (
+        SELECT
+          CVE_ART,
+          SUM(EXIST) AS EXISTENCIA
+        FROM
+          MULT02
+        WHERE
+          CVE_ALM IN (1, 6)
+        GROUP BY
+          CVE_ART
+      ) T2_AGGR ON T1.CVE_ART = T2_AGGR.CVE_ART
     LEFT JOIN
-      PRECIO_X_PROD02 T3 ON T1.CVE_ART = T3.CVE_ART
+      -- SUBQUERY 2: EXTRACCIÓN DE PRECIO (Garantiza 1 fila por producto)
+      (
+        SELECT
+          CVE_ART,
+          PRECIO
+        FROM
+          PRECIO_X_PROD02
+        WHERE
+          CVE_PRECIO = 1
+      ) T3_AGGR ON T1.CVE_ART = T3_AGGR.CVE_ART
     WHERE
       T1.CVE_ART = ?  -- FILTRO POR CLAVE ÚNICA
     GROUP BY
       T1.CVE_ART,
       T1.DESCR,
       T1.FCH_ULTCOM,
-      T1.ULT_COSTO;
+      T1.ULT_COSTO,
+      T2_AGGR.EXISTENCIA,
+      T3_AGGR.PRECIO;
   `;
 
   try {
-    // Nota: Pasamos la clave como parámetro a la consulta
     const resultado = await db.query(sql, [clave]);
-
+    
+    // ... (rest of the logic remains the same)
     if (resultado.length === 0) {
       return res.status(404).json({ error: 'Producto no encontrado en la base de datos de Firebird.' });
     }
     
-    // Devolvemos el primer (y único) resultado
     res.json(resultado[0]); 
   } catch (error) {
-    console.error('Error al ejecutar la consulta consolidada por clave:', error);
+    // ... (error handling)
+    console.error('Error al ejecutar la consulta consolidada por clave (corregida):', error);
     res.status(500).json({ 
         error: 'Error interno del servidor al obtener datos consolidados.', 
         detalles: error.message 
