@@ -56,7 +56,7 @@ app.get('/productos-detallado', async (req, res) => {
       SUM(CASE WHEN T2.CVE_ALM IN (1, 6) THEN T2.EXIST ELSE 0 END) AS EXISTENCIA,
       MAX(CASE WHEN T3.CVE_PRECIO = 1 THEN T3.PRECIO ELSE NULL END) AS PRECIO
     FROM
-      INVE01 T1
+      INVE02 T1
     LEFT JOIN
       MULT02 T2 ON T1.CVE_ART = T2.CVE_ART
     LEFT JOIN
