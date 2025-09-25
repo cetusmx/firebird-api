@@ -166,6 +166,34 @@ app.get('/existencias', async (req, res) => {
   }
 });
 
+// Nuevo Endpoint para obtener la información base de INVE01 (DESCR, FCH_ULTCOM, ULT_COSTO)
+app.get('/inventario', async (req, res) => {
+  const sql = `
+    SELECT
+      CVE_ART,
+      DESCR,
+      FCH_ULTCOM,
+      ULT_COSTO
+    FROM
+      INVE02 
+    WHERE
+      STATUS = 'A'
+    ORDER BY
+      CVE_ART;
+  `;
+
+  try {
+    const inventario = await db.query(sql);
+    res.json(inventario);
+  } catch (error) {
+    console.error('Error al ejecutar la consulta de inventario base:', error);
+    res.status(500).json({ 
+        error: 'Error al consultar la base de datos para obtener el inventario base.', 
+        detalles: error.message 
+    });
+  }
+});
+
 
 // Iniciar el servidor
 app.listen(port, () => {
