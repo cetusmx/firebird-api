@@ -25,6 +25,53 @@ app.get('/productos', async (req, res) => {
   }
 });
 
+// Endpoint consolidado para obtener todos los datos de un solo producto
+app.get('/inventariocompleto/:clave', async (req, res) => {
+  const { clave } = req.params;
+  
+  // Consulta SQL COMPLEJA para obtener todos los campos de un solo producto
+  const sql = `
+    SELECT
+      T1.CVE_ART,
+      T1.DESCR,
+      T1.FCH_ULTCOM,
+      T1.ULT_COSTO,
+      SUM(CASE WHEN T2.CVE_ALM IN (1, 6) THEN T2.EXIST ELSE 0 END) AS EXISTENCIA,
+      MAX(CASE WHEN T3.CVE_PRECIO = 1 THEN T3.PRECIO ELSE NULL END) AS PRECIO
+    FROM
+      INVE01 T1
+    LEFT JOIN
+      MULT02 T2 ON T1.CVE_ART = T2.CVE_ART
+    LEFT JOIN
+      PRECIO_X_PROD02 T3 ON T1.CVE_ART = T3.CVE_ART
+    WHERE
+      T1.CVE_ART = ?  -- FILTRO POR CLAVE ÚNICA
+    GROUP BY
+      T1.CVE_ART,
+      T1.DESCR,
+      T1.FCH_ULTCOM,
+      T1.ULT_COSTO;
+  `;
+
+  try {
+    // Nota: Pasamos la clave como parámetro a la consulta
+    const resultado = await db.query(sql, [clave]);
+
+    if (resultado.length === 0) {
+      return res.status(404).json({ error: 'Producto no encontrado en la base de datos de Firebird.' });
+    }
+    
+    // Devolvemos el primer (y único) resultado
+    res.json(resultado[0]); 
+  } catch (error) {
+    console.error('Error al ejecutar la consulta consolidada por clave:', error);
+    res.status(500).json({ 
+        error: 'Error interno del servidor al obtener datos consolidados.', 
+        detalles: error.message 
+    });
+  }
+});
+
 // Endpoint para obtener un producto por su ID
 app.get('/productos/:id', async (req, res) => {
   const { id } = req.params;
@@ -193,6 +240,7 @@ app.get('/inventario', async (req, res) => {
     });
   }
 });
+
 
 
 // Iniciar el servidor
