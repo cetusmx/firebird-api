@@ -54,6 +54,46 @@ app.get('/existenciaalm/:clave', async (req, res) => {
   }
 });
 
+// index.js (Nuevo Endpoint POST para existencias filtradas)
+
+app.post('/existencias-masiva-filtrada', async (req, res) => {
+  const claves = req.body.claves;
+
+  if (!Array.isArray(claves) || claves.length === 0) {
+    return res.status(400).json({ error: 'Se requiere un arreglo no vacío de claves de producto.' });
+  }
+
+  // 1. Crear una cadena de placeholders '?' para la cláusula IN
+  // Esto previene inyecciones SQL (SQL Injection).
+  const placeholders = claves.map(() => '?').join(', ');
+  
+  // 2. Consulta SQL con doble filtro: por las claves enviadas Y por almacén (1 y 6)
+  const sql = `
+    SELECT
+      CVE_ART,
+      CVE_ALM,
+      EXIST
+    FROM
+      MULT02
+    WHERE
+      CVE_ART IN (${placeholders}) AND CVE_ALM IN (1, 6)
+    ORDER BY
+      CVE_ART, CVE_ALM;
+  `;
+
+  try {
+    // 3. Ejecutar la consulta pasando el arreglo de claves como parámetros
+    const existencias = await db.query(sql, claves);
+    res.json(existencias);
+  } catch (error) {
+    console.error('Error al ejecutar la consulta de existencias masivas filtradas:', error);
+    res.status(500).json({ 
+        error: 'Error al consultar la base de datos para obtener las existencias filtradas.', 
+        detalles: error.message 
+    });
+  }
+});
+
 // Endpoint para obtener todos los productos
 app.get('/productos', async (req, res) => {
   const sql = 'SELECT * FROM PRODUCTOS';
