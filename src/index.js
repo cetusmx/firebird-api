@@ -1,5 +1,6 @@
 // src/index.js
 const express = require('express');
+const morgan = require('morgan');
 const db = require('./db');
 require('dotenv').config();
 
@@ -8,6 +9,7 @@ const port = process.env.API_PORT || 3010;
 
 // Middleware para parsear JSON en las solicitudes (aunque no lo necesitemos para solo lectura, es una buena práctica)
 app.use(express.json());
+app.use(morgan('dev'));
 
 // Endpoint de prueba
 app.get('/', (req, res) => {
