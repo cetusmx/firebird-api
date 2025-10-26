@@ -9,7 +9,7 @@ const port = process.env.API_PORT || 3010;
 
 // Middleware para parsear JSON en las solicitudes (aunque no lo necesitemos para solo lectura, es una buena práctica)
 app.use(express.json());
-app.use(morgan('dev'));
+app.use(morgan());
 
 // Endpoint de prueba
 app.get('/', (req, res) => {
