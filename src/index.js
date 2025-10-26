@@ -107,7 +107,8 @@ app.get('/productos', async (req, res) => {
   }
 });
 
-// Endpoint consolidado para obtener todos los datos de un solo producto
+// Endpoint consolidado para obtener todos los datos de un solo producto, este
+//es el que se utiliza para ProductDetailPage
 app.get('/inventariocompleto/:clave', async (req, res) => {
   const { clave } = req.params;
   
