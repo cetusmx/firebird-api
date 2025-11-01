@@ -324,7 +324,8 @@ app.get('/inventario', async (req, res) => {
       CVE_ART,
       DESCR,
       FCH_ULTCOM,
-      ULT_COSTO
+      ULT_COSTO,
+      UNI_MED
     FROM
       INVE02 
     WHERE
