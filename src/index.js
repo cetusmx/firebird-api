@@ -346,7 +346,109 @@ app.get('/inventario', async (req, res) => {
   }
 });
 
+// Endpoint para obtener información de productos con sus claves alternas y proveedores
+app.get('/clavesalternas', async (req, res) => {
+  // Consulta SQL para combinar INVE02, CVES_ALTER02 y PROV02
+  const sql = `
+    SELECT
+      T1.CVE_ART,         -- Clave de Producto (INVE02)
+      T1.DESCR,           -- Descripción (INVE02)
+      T1.UNI_MED,         -- Unidad de Medida (INVE02)
+      T1.FCH_ULTCOM,      -- Fecha Última Compra (INVE02)
+      T1.ULT_COSTO,       -- Último Costo (INVE02)
+      T2.CVE_ALTER,       -- Clave Alterna (CVES_ALTER02)
+      T2.CVE_CLPV,        -- Clave de Proveedor (CVES_ALTER02)
+      T3.NOMBRE           -- Nombre del Proveedor (PROV02)
+    FROM
+      INVE02 T1 -- Tabla Principal: Productos
+    LEFT JOIN
+      CVES_ALTER02 T2 -- JOIN 1: Claves Alternas
+      ON T1.CVE_ART = T2.CVE_ART
+    LEFT JOIN
+      PROV02 T3 -- JOIN 2: Proveedores
+      ON T2.CVE_CLPV = T3.CLAVE
+    WHERE
+      T2.TIPO = 'P' -- Filtro requerido: Solo claves alternas de TIPO "P" (Proveedor)
+    ORDER BY
+      T1.CVE_ART, T2.CVE_ALTER;
+  `;
 
+  try {
+    const resultados = await db.query(sql);
+
+    // Si quieres agrupar los resultados por CVE_ART para que sea más fácil de consumir por el frontend,
+    // puedes procesarlos aquí. Dejamos el resultado plano (más eficiente para la DB) por defecto.
+    // **Nota:** Cada fila representará una combinación única de (Producto, Clave Alterna, Proveedor).
+
+    res.json(resultados);
+  } catch (error) {
+    console.error('Error al ejecutar la consulta de claves alternas:', error);
+    res.status(500).json({ 
+        error: 'Error interno del servidor al obtener las claves alternas.', 
+        detalles: error.message 
+    });
+  }
+});
+
+// Endpoint para búsqueda de Claves Alternas, utilizado en inputs de autocompletado
+app.get('/clavesalternas/search', async (req, res) => {
+  // Obtener el término de búsqueda de los query parameters (ej: /search?query=XYZ)
+  const searchTerm = req.query.query ? req.query.query.toUpperCase() : '';
+
+  // Usamos el símbolo '%' para la búsqueda LIKE en SQL
+  const likeTerm = `%${searchTerm}%`;
+
+  // Consulta SQL (similar a /clavesalternas pero con filtro WHERE)
+  const sql = `
+    SELECT
+      T1.CVE_ART,         -- Clave de Producto (INVE02)
+      T1.DESCR,           -- Descripción (INVE02)
+      T1.UNI_MED,         -- Unidad de Medida (INVE02)
+      T1.FCH_ULTCOM,      -- Fecha Última Compra (INVE02)
+      T1.ULT_COSTO,       -- Último Costo (INVE02)
+      T2.CVE_ALTER,       -- Clave Alterna (CVES_ALTER02)
+      T2.CVE_CLPV,        -- Clave de Proveedor (CVES_ALTER02)
+      T3.NOMBRE           -- Nombre del Proveedor (PROV02)
+    FROM
+      INVE02 T1
+    LEFT JOIN
+      CVES_ALTER02 T2
+      ON T1.CVE_ART = T2.CVE_ART
+    LEFT JOIN
+      PROV02 T3
+      ON T2.CVE_CLPV = T3.CLAVE
+    WHERE
+      T2.TIPO = 'P' -- Filtro requerido: Solo claves alternas de TIPO "P"
+      AND (
+        T1.CVE_ART LIKE ? OR       -- Buscar por Clave de Producto
+        T1.DESCR LIKE ? OR         -- Buscar por Descripción
+        T2.CVE_ALTER LIKE ? OR     -- Buscar por Clave Alterna
+        T3.NOMBRE LIKE ?           -- Buscar por Nombre del Proveedor
+      )
+    ORDER BY
+      T1.CVE_ART, T2.CVE_ALTER
+    FETCH FIRST 50 ROWS ONLY; -- Limitar a 50 resultados para autocompletado rápido
+  `;
+
+  // El array de parámetros debe contener 'likeTerm' repetido cuatro veces para la búsqueda OR
+  const params = [likeTerm, likeTerm, likeTerm, likeTerm];
+
+  try {
+    const resultados = await db.query(sql, params);
+
+    if (resultados.length === 0 && searchTerm.length > 0) {
+        return res.status(404).json({ message: `No se encontraron coincidencias para "${searchTerm}".` });
+    }
+    
+    res.json(resultados);
+  } catch (error) {
+    console.error('Error al ejecutar la consulta de búsqueda de claves alternas:', error);
+    res.status(500).json({ 
+        error: 'Error interno del servidor al obtener las claves alternas para la búsqueda.', 
+        detalles: error.message 
+    });
+  }
+});
 
 // Iniciar el servidor
 app.listen(port, () => {
