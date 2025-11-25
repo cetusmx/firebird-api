@@ -2,10 +2,19 @@
 const express = require('express');
 const morgan = require('morgan');
 const db = require('./db');
+const cors = require('cors');
 require('dotenv').config();
 
 const app = express();
 const port = process.env.API_PORT || 3010;
+
+const corsOptions = {
+    origin: 'http://localhost:5173', 
+    methods: 'GET,HEAD,PUT,PATCH,POST,DELETE', // Permite todos los métodos necesarios
+    credentials: true, // Si necesitas enviar cookies o cabeceras de autorización
+};
+
+app.use(cors(corsOptions));
 
 // Middleware para parsear JSON en las solicitudes (aunque no lo necesitemos para solo lectura, es una buena práctica)
 app.use(express.json());
