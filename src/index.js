@@ -402,7 +402,7 @@ app.get('/clavesalternas/search', async (req, res) => {
 
   // Consulta SQL (similar a /clavesalternas pero con filtro WHERE)
   const sql = `
-    SELECT
+    SELECT FIRST 50
       T1.CVE_ART,         -- Clave de Producto (INVE02)
       T1.DESCR,           -- Descripción (INVE02)
       T1.UNI_MED,         -- Unidad de Medida (INVE02)
@@ -428,8 +428,7 @@ app.get('/clavesalternas/search', async (req, res) => {
         T3.NOMBRE LIKE ?           -- Buscar por Nombre del Proveedor
       )
     ORDER BY
-      T1.CVE_ART, T2.CVE_ALTER
-    FETCH FIRST 50 ROWS ONLY; -- Limitar a 50 resultados para autocompletado rápido
+      T1.CVE_ART, T2.CVE_ALTER;
   `;
 
   // El array de parámetros debe contener 'likeTerm' repetido cuatro veces para la búsqueda OR
