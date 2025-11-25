@@ -393,8 +393,10 @@ app.get('/clavesalternas', async (req, res) => {
 // Endpoint para búsqueda de Claves Alternas, utilizado en inputs de autocompletado
 app.get('/clavesalternas/search', async (req, res) => {
   // Obtener el término de búsqueda de los query parameters (ej: /search?query=XYZ)
-  const searchTerm = req.query.query ? req.query.query.toUpperCase() : '';
-
+  //const searchTerm = req.query.query ? req.query.query.toUpperCase() : '';
+  const searchTerm = req.query ? req.query.toUpperCase() : '';
+  console.log(searchTerm);
+  
   // Usamos el símbolo '%' para la búsqueda LIKE en SQL
   const likeTerm = `%${searchTerm}%`;
 
