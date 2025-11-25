@@ -394,9 +394,9 @@ app.get('/clavesalternas', async (req, res) => {
 app.get('/clavesalternas/search', async (req, res) => {
   // Obtener el término de búsqueda de los query parameters (ej: /search?query=XYZ)
   //const searchTerm = req.query.query ? req.query.query.toUpperCase() : '';
-  const searchTerm = req.query ? req.query.toUpperCase() : '';
+  const searchTerm = req.query.query ? req.query.query.toUpperCase() : '';
   console.log(searchTerm);
-  
+
   // Usamos el símbolo '%' para la búsqueda LIKE en SQL
   const likeTerm = `%${searchTerm}%`;
 
