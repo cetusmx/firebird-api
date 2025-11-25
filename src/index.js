@@ -431,10 +431,10 @@ app.get('/clavesalternas/search', async (req, res) => {
     WHERE
       T2.TIPO = 'P' -- Filtro requerido: Solo claves alternas de TIPO "P"
       AND (
-        T1.CVE_ART LIKE ? OR       -- Buscar por Clave de Producto
-        T1.DESCR LIKE ? OR         -- Buscar por Descripción
-        T2.CVE_ALTER LIKE ? OR     -- Buscar por Clave Alterna
-        T3.NOMBRE LIKE ?           -- Buscar por Nombre del Proveedor
+        T1.CVE_ART LIKE CAST(? AS VARCHAR(255)) OR       -- <--- ¡CAST APLICADO AQUÍ!
+        T1.DESCR LIKE CAST(? AS VARCHAR(255)) OR         -- <--- ¡CAST APLICADO AQUÍ!
+        T2.CVE_ALTER LIKE CAST(? AS VARCHAR(255)) OR     -- <--- ¡CAST APLICADO AQUÍ!
+        T3.NOMBRE LIKE CAST(? AS VARCHAR(255))
       )
     ORDER BY
       T1.CVE_ART, T2.CVE_ALTER;
