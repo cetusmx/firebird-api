@@ -576,6 +576,86 @@ app.get('/familias', async (req, res) => {
   }
 });
 
+// Nuevo Endpoint para búsqueda y filtrado avanzado con paginación
+// Acepta: ?familia=X&diam_int=Y&limit=50&offset=0
+app.get('/clavesalternas/filter', async (req, res) => {
+    // 1. Configuración de Paginación
+    const limit = parseInt(req.query.limit) || 100; // Límite por defecto de 100
+    const offset = parseInt(req.query.offset) || 0; // Desplazamiento por defecto 0
+
+    // 2. Definición de Parámetros de Filtrado
+    // Mapeamos los query params a los nombres reales de las columnas en INVE_CLIB02
+    const filterMap = {
+        FAMILIA: 'T4.CAMPLIB22',
+        DIAM_INT: 'T4.CAMPLIB1',
+        DIAM_EXT: 'T4.CAMPLIB2',
+        ALTURA: 'T4.CAMPLIB3',
+        SECCION: 'T4.CAMPLIB7',
+        SIST_MED: 'T4.CAMPLIB17',
+    };
+
+    let whereClauses = [];
+    let params = [];
+    
+    // 3. Construcción Dinámica de la Cláusula WHERE
+    // Siempre incluimos el filtro TIPO = 'P' y construimos los demás dinámicamente.
+    whereClauses.push("T2.TIPO = 'P'");
+
+    for (const alias in filterMap) {
+        // Normalizamos el valor del query (mayúsculas, recortar espacios)
+        const queryValue = req.query[alias.toLowerCase()]; 
+
+        if (queryValue) {
+            const column = filterMap[alias];
+            const likeTerm = `%${queryValue.toUpperCase().trim()}%`;
+            
+            // Usamos LIKE y CAST para buscar patrones en campos de texto y evitar el error -303 (truncamiento)
+            whereClauses.push(`${column} LIKE CAST(? AS VARCHAR(255))`);
+            params.push(likeTerm);
+        }
+    }
+
+    // 4. Creación de la Consulta SQL Final
+    const whereString = whereClauses.length > 0 ? `WHERE ${whereClauses.join(' AND ')}` : '';
+
+    const sql = `
+        SELECT FIRST ${limit} SKIP ${offset} -- <--- Implementación de Paginación Firebird
+            T1.CVE_ART, T1.DESCR, T1.UNI_MED, T1.FCH_ULTCOM, T1.ULT_COSTO,
+            T2.CVE_ALTER, T2.CVE_CLPV, T3.NOMBRE,
+            -- Campos de INVE_CLIB02 T4
+            T4.CAMPLIB1 AS DIAM_INT, T4.CAMPLIB2 AS DIAM_EXT, T4.CAMPLIB3 AS ALTURA,
+            T4.CAMPLIB7 AS SECCION, T4.CAMPLIB15 AS CLA_SYR, T4.CAMPLIB16 AS CLA_LC,
+            T4.CAMPLIB17 AS SIST_MED, T4.CAMPLIB19 AS DESC_ECOMM, T4.CAMPLIB21 AS GENERO,
+            T4.CAMPLIB22 AS FAMILIA
+        FROM
+            INVE02 T1
+        LEFT JOIN CVES_ALTER02 T2 ON T1.CVE_ART = T2.CVE_ART
+        LEFT JOIN PROV02 T3 ON T2.CVE_CLPV = T3.CLAVE
+        LEFT JOIN INVE_CLIB02 T4 ON T1.CVE_ART = T4.CVE_PROD
+        ${whereString}
+        ORDER BY
+            T1.CVE_ART, T2.CVE_ALTER;
+    `;
+
+    try {
+        const resultados = await db.query(sql, params);
+
+        // Si no se recibe ningún parámetro de filtro (solo paginación), se devuelven todos los resultados paginados.
+        // Si no se encuentran resultados con filtros, se devuelve un 404.
+        if (resultados.length === 0 && Object.keys(req.query).some(key => key !== 'limit' && key !== 'offset')) {
+             return res.status(404).json({ message: 'No se encontraron resultados que coincidan con los criterios de filtro.' });
+        }
+
+        res.json(resultados);
+    } catch (error) {
+        console.error('Error al ejecutar la consulta de filtrado de claves alternas:', error);
+        res.status(500).json({ 
+            error: 'Error interno del servidor al obtener las claves alternas por filtro.', 
+            detalles: error.message 
+        });
+    }
+});
+
 // Iniciar el servidor
 app.listen(port, () => {
   console.log(`Servidor escuchando en http://localhost:${port}`);
