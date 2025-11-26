@@ -549,6 +549,33 @@ app.get('/clavesalternas/search', async (req, res) => {
   }
 });
 
+// Nuevo Endpoint para obtener las familias únicas de INVE_CLIB02
+app.get('/familias', async (req, res) => {
+  const sql = `
+    SELECT DISTINCT
+      CAMPLIB22 AS FAMILIA
+    FROM
+      INVE_CLIB02
+    WHERE
+      CAMPLIB22 IS NOT NULL AND CAMPLIB22 <> ''
+    ORDER BY
+      FAMILIA;
+  `;
+
+  try {
+    const familias = await db.query(sql);
+    
+    // Devolvemos la lista de familias únicas
+    res.json(familias);
+  } catch (error) {
+    console.error('Error al ejecutar la consulta de familias únicas:', error);
+    res.status(500).json({ 
+        error: 'Error interno del servidor al obtener las familias.', 
+        detalles: error.message 
+    });
+  }
+});
+
 // Iniciar el servidor
 app.listen(port, () => {
   console.log(`Servidor escuchando en http://localhost:${port}`);
