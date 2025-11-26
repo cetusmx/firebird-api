@@ -603,11 +603,17 @@ app.get('/clavesalternas/filter', async (req, res) => {
 
     for (const alias in filterMap) {
         // Normalizamos el valor del query (mayúsculas, recortar espacios)
-        const queryValue = req.query[alias.toLowerCase()]; 
+        let queryValue = req.query[alias.toLowerCase()]; 
 
         if (queryValue) {
+          // 1. Reemplazar cualquier '+' por un espacio.
+            // 2. Normalizar a mayúsculas y eliminar espacios extra.
+            queryValue = queryValue.replace(/\+/g, ' ').toUpperCase().trim();
+
+            if (queryValue === '') continue; // Ignorar si queda vacío tras limpiar
+
             const column = filterMap[alias];
-            const likeTerm = `%${queryValue.toUpperCase().trim()}%`;
+            const likeTerm = `%${queryValue}%`;
             
             // Usamos LIKE y CAST para buscar patrones en campos de texto y evitar el error -303 (truncamiento)
             whereClauses.push(`${column} LIKE CAST(? AS VARCHAR(255))`);
