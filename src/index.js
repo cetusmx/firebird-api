@@ -613,7 +613,7 @@ app.get('/clavesalternas/filter', async (req, res) => {
             if (queryValue === '') continue; // Ignorar si queda vacío tras limpiar
 
             const column = filterMap[alias];
-            const likeTerm = `%${queryValue}%`;
+            const likeTerm = `${queryValue}%`;
             
             // Usamos LIKE, manteniendo UPPER(TRIM()) y CAST para la máxima fiabilidad
             whereClauses.push(`UPPER(TRIM(${column})) LIKE CAST(? AS VARCHAR(255))`);
