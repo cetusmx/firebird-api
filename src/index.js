@@ -615,10 +615,8 @@ app.get('/clavesalternas/filter', async (req, res) => {
             const column = filterMap[alias];
             const likeTerm = `%${queryValue}%`;
             
-            // Usamos LIKE y CAST para buscar patrones en campos de texto y evitar el error -303 (truncamiento)
-            // Aplicamos TRIM() a la columna de la DB antes de la comparación LIKE
-            // Usamos UPPER(TRIM()) para limpiar el dato en la BD y asegurar una coincidencia exacta.
-            whereClauses.push(`UPPER(TRIM(${column})) = CAST(? AS VARCHAR(255))`);
+            // Usamos LIKE, manteniendo UPPER(TRIM()) y CAST para la máxima fiabilidad
+            whereClauses.push(`UPPER(TRIM(${column})) LIKE CAST(? AS VARCHAR(255))`);
 
             params.push(likeTerm);
         }
