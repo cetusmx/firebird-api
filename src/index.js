@@ -616,7 +616,9 @@ app.get('/clavesalternas/filter', async (req, res) => {
             const likeTerm = `%${queryValue}%`;
             
             // Usamos LIKE y CAST para buscar patrones en campos de texto y evitar el error -303 (truncamiento)
-            whereClauses.push(`${column} LIKE CAST(? AS VARCHAR(255))`);
+            // Aplicamos TRIM() a la columna de la DB antes de la comparación LIKE
+            whereClauses.push(`TRIM(${column}) LIKE CAST(? AS VARCHAR(255))`);
+            
             params.push(likeTerm);
         }
     }
