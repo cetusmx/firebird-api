@@ -355,9 +355,13 @@ app.get('/inventario', async (req, res) => {
   }
 });
 
+// index.js
+
+// ... (código anterior)
+
 // Endpoint para obtener información de productos con sus claves alternas y proveedores
 app.get('/clavesalternas', async (req, res) => {
-  // Consulta SQL para combinar INVE02, CVES_ALTER02 y PROV02
+  // Consulta SQL para combinar INVE02, CVES_ALTER02, PROV02 y AHORA INVE_CLIB02
   const sql = `
     SELECT
       T1.CVE_ART,         -- Clave de Producto (INVE02)
@@ -367,7 +371,18 @@ app.get('/clavesalternas', async (req, res) => {
       T1.ULT_COSTO,       -- Último Costo (INVE02)
       T2.CVE_ALTER,       -- Clave Alterna (CVES_ALTER02)
       T2.CVE_CLPV,        -- Clave de Proveedor (CVES_ALTER02)
-      T3.NOMBRE           -- Nombre del Proveedor (PROV02)
+      T3.NOMBRE,          -- Nombre del Proveedor (PROV02)
+      -- Nuevos campos de INVE_CLIB02 T4
+      T4.CAMPLIB1 AS DIAM_INT,
+      T4.CAMPLIB2 AS DIAM_EXT,
+      T4.CAMPLIB3 AS ALTURA,
+      T4.CAMPLIB7 AS SECCION,
+      T4.CAMPLIB15 AS CLA_SYR,
+      T4.CAMPLIB16 AS CLA_LC,
+      T4.CAMPLIB17 AS SIST_MED,
+      T4.CAMPLIB19 AS DESC_ECOMM,
+      T4.CAMPLIB21 AS GENERO,
+      T4.CAMPLIB22 AS FAMILIA
     FROM
       INVE02 T1 -- Tabla Principal: Productos
     LEFT JOIN
@@ -376,6 +391,9 @@ app.get('/clavesalternas', async (req, res) => {
     LEFT JOIN
       PROV02 T3 -- JOIN 2: Proveedores
       ON T2.CVE_CLPV = T3.CLAVE
+    LEFT JOIN
+      INVE_CLIB02 T4 -- <--- ¡NUEVO JOIN para campos libres!
+      ON T1.CVE_ART = T4.CVE_PROD
     WHERE
       T2.TIPO = 'P' -- Filtro requerido: Solo claves alternas de TIPO "P" (Proveedor)
     ORDER BY
@@ -384,11 +402,6 @@ app.get('/clavesalternas', async (req, res) => {
 
   try {
     const resultados = await db.query(sql);
-
-    // Si quieres agrupar los resultados por CVE_ART para que sea más fácil de consumir por el frontend,
-    // puedes procesarlos aquí. Dejamos el resultado plano (más eficiente para la DB) por defecto.
-    // **Nota:** Cada fila representará una combinación única de (Producto, Clave Alterna, Proveedor).
-
     res.json(resultados);
   } catch (error) {
     console.error('Error al ejecutar la consulta de claves alternas:', error);
@@ -399,7 +412,7 @@ app.get('/clavesalternas', async (req, res) => {
   }
 });
 
-// Endpoint para búsqueda de Claves Alternas, utilizado en inputs de autocompletado
+/* // Endpoint para búsqueda de Claves Alternas, utilizado en inputs de autocompletado
 app.get('/clavesalternas/search', async (req, res) => {
   // Obtener el término de búsqueda de los query parameters (ej: /search?query=XYZ)
   //const searchTerm = req.query.query ? req.query.query.toUpperCase() : '';
@@ -441,6 +454,82 @@ app.get('/clavesalternas/search', async (req, res) => {
   `;
 
   // El array de parámetros debe contener 'likeTerm' repetido cuatro veces para la búsqueda OR
+  const params = [likeTerm, likeTerm, likeTerm, likeTerm];
+
+  try {
+    const resultados = await db.query(sql, params);
+
+    if (resultados.length === 0 && searchTerm.length > 0) {
+        return res.status(404).json({ message: `No se encontraron coincidencias para "${searchTerm}".` });
+    }
+    
+    res.json(resultados);
+  } catch (error) {
+    console.error('Error al ejecutar la consulta de búsqueda de claves alternas:', error);
+    res.status(500).json({ 
+        error: 'Error interno del servidor al obtener las claves alternas para la búsqueda.', 
+        detalles: error.message 
+    });
+  }
+}); */
+
+// index.js
+
+// ... (código anterior)
+
+// Endpoint para búsqueda de Claves Alternas, utilizado en inputs de autocompletado
+app.get('/clavesalternas/search', async (req, res) => {
+  const searchTerm = req.query.query ? req.query.query.toUpperCase() : '';
+  console.log(searchTerm);
+
+  const likeTerm = `%${searchTerm}%`;
+
+  // Consulta SQL (MODIFICADA: Agregando INVE_CLIB02 con CAST para el LIKE)
+  const sql = `
+    SELECT FIRST 50
+      T1.CVE_ART,         -- Clave de Producto (INVE02)
+      T1.DESCR,           -- Descripción (INVE02)
+      T1.UNI_MED,         -- Unidad de Medida (INVE02)
+      T1.FCH_ULTCOM,      -- Fecha Última Compra (INVE02)
+      T1.ULT_COSTO,       -- Último Costo (INVE02)
+      T2.CVE_ALTER,       -- Clave Alterna (CVES_ALTER02)
+      T2.CVE_CLPV,        -- Clave de Proveedor (CVES_ALTER02)
+      T3.NOMBRE,          -- Nombre del Proveedor (PROV02)
+      -- Nuevos campos de INVE_CLIB02 T4
+      T4.CAMPLIB1 AS DIAM_INT,
+      T4.CAMPLIB2 AS DIAM_EXT,
+      T4.CAMPLIB3 AS ALTURA,
+      T4.CAMPLIB7 AS SECCION,
+      T4.CAMPLIB15 AS CLA_SYR,
+      T4.CAMPLIB16 AS CLA_LC,
+      T4.CAMPLIB17 AS SIST_MED,
+      T4.CAMPLIB19 AS DESC_ECOMM,
+      T4.CAMPLIB21 AS GENERO,
+      T4.CAMPLIB22 AS FAMILIA
+    FROM
+      INVE02 T1
+    LEFT JOIN
+      CVES_ALTER02 T2
+      ON T1.CVE_ART = T2.CVE_ART
+    LEFT JOIN
+      PROV02 T3
+      ON T2.CVE_CLPV = T3.CLAVE
+    LEFT JOIN
+      INVE_CLIB02 T4 -- <--- ¡NUEVO JOIN para campos libres!
+      ON T1.CVE_ART = T4.CVE_PROD
+    WHERE
+      T2.TIPO = 'P' -- Filtro requerido: Solo claves alternas de TIPO "P"
+      AND (
+        T1.CVE_ART LIKE CAST(? AS VARCHAR(255)) OR
+        T1.DESCR LIKE CAST(? AS VARCHAR(255)) OR
+        T2.CVE_ALTER LIKE CAST(? AS VARCHAR(255)) OR
+        T3.NOMBRE LIKE CAST(? AS VARCHAR(255))
+      )
+    ORDER BY
+      T1.CVE_ART, T2.CVE_ALTER;
+  `;
+
+  // El array de parámetros sigue siendo el mismo.
   const params = [likeTerm, likeTerm, likeTerm, likeTerm];
 
   try {
