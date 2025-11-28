@@ -700,7 +700,7 @@ app.get('/clavesalternas/filter', async (req, res) => {
             if (queryValue === '') continue; // Saltar si queda vacío
 
             const column = filterMap[alias];
-            const likeTerm = `%${queryValue}%`;
+            const likeTerm = `${queryValue}%`;
             
             // Lógica robusta: UPPER(TRIM(columna)) LIKE '%?%' con CAST para evitar errores de Firebird
             whereClauses.push(`UPPER(TRIM(${column})) LIKE CAST(? AS VARCHAR(255))`);
