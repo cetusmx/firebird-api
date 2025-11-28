@@ -908,7 +908,8 @@ app.get('/clavesalternas/filter', async (req, res) => {
                 if (isNaN(cleanNumericValue)) continue; 
 
                 // Expresión en DB: Limpia espacios, reemplaza coma por punto, y CONVIERTE A NUMÉRICO
-                const dbColumnExpression = `CAST(REPLACE(TRIM(${column}), ',', '.') AS NUMERIC(15, 5))`;
+                //const dbColumnExpression = `CAST(REPLACE(TRIM(${column}), ',', '.') AS NUMERIC(15, 5))`;
+                const dbColumnExpression = `CAST(REPLACE(COALESCE(NULLIF(TRIM(${column}), ''), '0'), ',', '.') AS NUMERIC(15, 5))`;
                 
                 // Usamos IGUALDAD (=) para la coincidencia numérica exacta
                 whereClauses.push(`${dbColumnExpression} = CAST(? AS NUMERIC(15, 5))`);
