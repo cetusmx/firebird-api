@@ -478,7 +478,7 @@ app.get('/clavesalternas/search', async (req, res) => {
 // ... (código anterior)
 
 // Endpoint para búsqueda de Claves Alternas, utilizado en inputs de autocompletado
-app.get('/clavesalternas/search', async (req, res) => {
+/* app.get('/clavesalternas/search', async (req, res) => {
   const searchTerm = req.query.query ? req.query.query.toUpperCase() : '';
   console.log(searchTerm);
 
@@ -546,6 +546,85 @@ app.get('/clavesalternas/search', async (req, res) => {
         error: 'Error interno del servidor al obtener las claves alternas para la búsqueda.', 
         detalles: error.message 
     });
+  }
+}); */
+
+// index.js
+
+// ... (código anterior)
+
+// Endpoint para buscar productos por diversos campos (CVE_ART, DESCR, CVE_ALTER, NOMBRE)
+// y consolidar las claves alternas de proveedores '3' y '35' en columnas PROV1 y PROV2.
+app.get('/clavesalternas/search', async (req, res) => {
+  const { term } = req.query;
+  // Convertimos el término de búsqueda a mayúsculas y agregamos comodines %
+  const searchTerm = term ? term.toUpperCase().trim() : '';
+  const likeTerm = `%${searchTerm}%`;
+
+  const sql = `
+    SELECT
+      T1.CVE_ART, 
+      T1.DESCR, 
+      T1.UNI_MED, 
+      T1.FCH_ULTCOM, 
+      T1.ULT_COSTO,
+      
+      -- 1. PIVOT: Clave alterna del Proveedor '3' (PROV1)
+      MAX(CASE 
+        WHEN T2.CVE_CLPV = '3' 
+        THEN T2.CVE_ALTER 
+        ELSE NULL 
+      END) AS PROV1, 
+      
+      -- 2. PIVOT: Clave alterna del Proveedor '35' (PROV2)
+      MAX(CASE 
+        WHEN T2.CVE_CLPV = '35' 
+        THEN T2.CVE_ALTER 
+        ELSE NULL 
+      END) AS PROV2
+      
+    FROM
+      INVE02 T1
+    LEFT JOIN
+      CVES_ALTER02 T2
+      ON T1.CVE_ART = T2.CVE_ART
+    LEFT JOIN
+      PROV02 T3
+      ON T2.CVE_CLPV = T3.CLAVE
+    WHERE
+      T2.TIPO = 'P' -- Filtro requerido: Solo claves alternas de TIPO "P"
+      AND (\r\n
+        T1.CVE_ART LIKE CAST(? AS VARCHAR(255)) OR       
+        T1.DESCR LIKE CAST(? AS VARCHAR(255)) OR         
+        T2.CVE_ALTER LIKE CAST(? AS VARCHAR(255)) OR     
+        T3.NOMBRE LIKE CAST(? AS VARCHAR(255))
+      )
+    GROUP BY
+      T1.CVE_ART, T1.DESCR, T1.UNI_MED, T1.FCH_ULTCOM, T1.ULT_COSTO
+    ORDER BY
+      T1.CVE_ART;
+  `;
+
+  // El array de parámetros debe contener 'likeTerm' repetido cuatro veces para la búsqueda OR
+  const params = [likeTerm, likeTerm, likeTerm, likeTerm];
+
+  try {
+    const resultados = await db.query(sql, params);
+
+    // Si no hay resultados y el usuario buscó algo, devuelve 404
+    if (resultados.length === 0 && searchTerm.length > 0) {
+        return res.status(404).json({ message: `No se encontraron coincidencias para "${searchTerm}".` });
+    }
+    
+    // Si no hay resultados pero no se buscó nada (ej: consulta inicial sin término), devuelve 200 con array vacío
+    if (resultados.length === 0) {
+        return res.status(200).json([]);
+    }
+
+    res.json(resultados);
+  } catch (error) {
+    console.error('Error al ejecutar la consulta de búsqueda de claves alternas:', error);
+    res.status(500).json({ error: 'Error interno del servidor al obtener las claves alternas.', detalles: error.message });
   }
 });
 
