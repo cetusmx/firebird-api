@@ -556,9 +556,8 @@ app.get('/clavesalternas/search', async (req, res) => {
 // Endpoint para buscar productos por diversos campos (CVE_ART, DESCR, CVE_ALTER, NOMBRE)
 // y consolidar las claves alternas de proveedores '3' y '35' en columnas PROV1 y PROV2.
 app.get('/clavesalternas/search', async (req, res) => {
-  const { term } = req.query;
-  // Convertimos el término de búsqueda a mayúsculas y agregamos comodines %
-  const searchTerm = term ? term.toUpperCase().trim() : '';
+  const { query } = req.query;
+  const searchTerm = query ? query.toUpperCase().trim() : '';
   const likeTerm = `%${searchTerm}%`;
 
   const sql = `
