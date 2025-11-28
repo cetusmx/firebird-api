@@ -562,7 +562,7 @@ app.get('/clavesalternas/search', async (req, res) => {
   const likeTerm = `%${searchTerm}%`;
 
   const sql = `
-    SELECT
+    SELECT FIRST 50
       T1.CVE_ART, 
       T1.DESCR, 
       T1.UNI_MED, 
@@ -571,14 +571,14 @@ app.get('/clavesalternas/search', async (req, res) => {
       
       -- 1. PIVOT: Clave alterna del Proveedor '3' (PROV1)
       MAX(CASE 
-        WHEN T2.CVE_CLPV = '3' 
+        WHEN TRIM(T2.CVE_CLPV) = '3' 
         THEN T2.CVE_ALTER 
         ELSE NULL 
       END) AS PROV1, 
       
       -- 2. PIVOT: Clave alterna del Proveedor '35' (PROV2)
       MAX(CASE 
-        WHEN T2.CVE_CLPV = '35' 
+        WHEN TRIM(T2.CVE_CLPV) = '35' 
         THEN T2.CVE_ALTER 
         ELSE NULL 
       END) AS PROV2
