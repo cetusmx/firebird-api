@@ -412,150 +412,9 @@ app.get('/clavesalternas', async (req, res) => {
   }
 });
 
-/* // Endpoint para búsqueda de Claves Alternas, utilizado en inputs de autocompletado
-app.get('/clavesalternas/search', async (req, res) => {
-  // Obtener el término de búsqueda de los query parameters (ej: /search?query=XYZ)
-  //const searchTerm = req.query.query ? req.query.query.toUpperCase() : '';
-  const searchTerm = req.query.query ? req.query.query.toUpperCase() : '';
-  console.log(searchTerm);
-
-  // Usamos el símbolo '%' para la búsqueda LIKE en SQL
-  const likeTerm = `%${searchTerm}%`;
-
-  // Consulta SQL (similar a /clavesalternas pero con filtro WHERE)
-  const sql = `
-    SELECT FIRST 50
-      T1.CVE_ART,         -- Clave de Producto (INVE02)
-      T1.DESCR,           -- Descripción (INVE02)
-      T1.UNI_MED,         -- Unidad de Medida (INVE02)
-      T1.FCH_ULTCOM,      -- Fecha Última Compra (INVE02)
-      T1.ULT_COSTO,       -- Último Costo (INVE02)
-      T2.CVE_ALTER,       -- Clave Alterna (CVES_ALTER02)
-      T2.CVE_CLPV,        -- Clave de Proveedor (CVES_ALTER02)
-      T3.NOMBRE           -- Nombre del Proveedor (PROV02)
-    FROM
-      INVE02 T1
-    LEFT JOIN
-      CVES_ALTER02 T2
-      ON T1.CVE_ART = T2.CVE_ART
-    LEFT JOIN
-      PROV02 T3
-      ON T2.CVE_CLPV = T3.CLAVE
-    WHERE
-      T2.TIPO = 'P' -- Filtro requerido: Solo claves alternas de TIPO "P"
-      AND (
-        T1.CVE_ART LIKE CAST(? AS VARCHAR(255)) OR       -- <--- ¡CAST APLICADO AQUÍ!
-        T1.DESCR LIKE CAST(? AS VARCHAR(255)) OR         -- <--- ¡CAST APLICADO AQUÍ!
-        T2.CVE_ALTER LIKE CAST(? AS VARCHAR(255)) OR     -- <--- ¡CAST APLICADO AQUÍ!
-        T3.NOMBRE LIKE CAST(? AS VARCHAR(255))
-      )
-    ORDER BY
-      T1.CVE_ART, T2.CVE_ALTER;
-  `;
-
-  // El array de parámetros debe contener 'likeTerm' repetido cuatro veces para la búsqueda OR
-  const params = [likeTerm, likeTerm, likeTerm, likeTerm];
-
-  try {
-    const resultados = await db.query(sql, params);
-
-    if (resultados.length === 0 && searchTerm.length > 0) {
-        return res.status(404).json({ message: `No se encontraron coincidencias para "${searchTerm}".` });
-    }
-    
-    res.json(resultados);
-  } catch (error) {
-    console.error('Error al ejecutar la consulta de búsqueda de claves alternas:', error);
-    res.status(500).json({ 
-        error: 'Error interno del servidor al obtener las claves alternas para la búsqueda.', 
-        detalles: error.message 
-    });
-  }
-}); */
-
-// index.js
-
-// ... (código anterior)
-
-// Endpoint para búsqueda de Claves Alternas, utilizado en inputs de autocompletado
-/* app.get('/clavesalternas/search', async (req, res) => {
-  const searchTerm = req.query.query ? req.query.query.toUpperCase() : '';
-  console.log(searchTerm);
-
-  const likeTerm = `%${searchTerm}%`;
-
-  // Consulta SQL (MODIFICADA: Agregando INVE_CLIB02 con CAST para el LIKE)
-  const sql = `
-    SELECT FIRST 50
-      T1.CVE_ART,         -- Clave de Producto (INVE02)
-      T1.DESCR,           -- Descripción (INVE02)
-      T1.UNI_MED,         -- Unidad de Medida (INVE02)
-      T1.FCH_ULTCOM,      -- Fecha Última Compra (INVE02)
-      T1.ULT_COSTO,       -- Último Costo (INVE02)
-      T2.CVE_ALTER,       -- Clave Alterna (CVES_ALTER02)
-      T2.CVE_CLPV,        -- Clave de Proveedor (CVES_ALTER02)
-      T3.NOMBRE,          -- Nombre del Proveedor (PROV02)
-      -- Nuevos campos de INVE_CLIB02 T4
-      T4.CAMPLIB1 AS DIAM_INT,
-      T4.CAMPLIB2 AS DIAM_EXT,
-      T4.CAMPLIB3 AS ALTURA,
-      T4.CAMPLIB7 AS SECCION,
-      T4.CAMPLIB15 AS CLA_SYR,
-      T4.CAMPLIB16 AS CLA_LC,
-      T4.CAMPLIB17 AS SIST_MED,
-      T4.CAMPLIB19 AS DESC_ECOMM,
-      T4.CAMPLIB21 AS GENERO,
-      T4.CAMPLIB22 AS FAMILIA
-    FROM
-      INVE02 T1
-    LEFT JOIN
-      CVES_ALTER02 T2
-      ON T1.CVE_ART = T2.CVE_ART
-    LEFT JOIN
-      PROV02 T3
-      ON T2.CVE_CLPV = T3.CLAVE
-    LEFT JOIN
-      INVE_CLIB02 T4 -- <--- ¡NUEVO JOIN para campos libres!
-      ON T1.CVE_ART = T4.CVE_PROD
-    WHERE
-      T2.TIPO = 'P' -- Filtro requerido: Solo claves alternas de TIPO "P"
-      AND (
-        T1.CVE_ART LIKE CAST(? AS VARCHAR(255)) OR
-        T1.DESCR LIKE CAST(? AS VARCHAR(255)) OR
-        T2.CVE_ALTER LIKE CAST(? AS VARCHAR(255)) OR
-        T3.NOMBRE LIKE CAST(? AS VARCHAR(255))
-      )
-    ORDER BY
-      T1.CVE_ART, T2.CVE_ALTER;
-  `;
-
-  // El array de parámetros sigue siendo el mismo.
-  const params = [likeTerm, likeTerm, likeTerm, likeTerm];
-
-  try {
-    const resultados = await db.query(sql, params);
-
-    if (resultados.length === 0 && searchTerm.length > 0) {
-        return res.status(404).json({ message: `No se encontraron coincidencias para "${searchTerm}".` });
-    }
-    
-    res.json(resultados);
-  } catch (error) {
-    console.error('Error al ejecutar la consulta de búsqueda de claves alternas:', error);
-    res.status(500).json({ 
-        error: 'Error interno del servidor al obtener las claves alternas para la búsqueda.', 
-        detalles: error.message 
-    });
-  }
-}); */
-
-// index.js
-
-// ... (código anterior)
-
 // Endpoint para buscar productos por diversos campos (CVE_ART, DESCR, CVE_ALTER, NOMBRE)
 // y consolidar las claves alternas de proveedores '3' y '35' en columnas PROV1 y PROV2.
-app.get('/clavesalternas/search', async (req, res) => {
+/* app.get('/clavesalternas/search', async (req, res) => {
   const { query } = req.query;
   const searchTerm = query ? query.toUpperCase().trim() : '';
   const likeTerm = `%${searchTerm}%`;
@@ -625,6 +484,96 @@ app.get('/clavesalternas/search', async (req, res) => {
     console.error('Error al ejecutar la consulta de búsqueda de claves alternas:', error);
     res.status(500).json({ error: 'Error interno del servidor al obtener las claves alternas.', detalles: error.message });
   }
+}); */
+
+// Endpoint para buscar por clave de artículo, descripción, clave alterna o proveedor.
+// La consulta ahora debe realizarse con el parámetro '?query=...'
+app.get('/clavesalternas/search', async (req, res) => {
+    
+    // 1. Obtención y normalización del término de búsqueda
+    const { query } = req.query;
+    const searchTerm = query ? query.toUpperCase().trim() : '';
+    const likeTerm = `%${searchTerm}%`;
+
+    const sql = `
+        SELECT
+            T1.CVE_ART, 
+            T1.DESCR, 
+            T1.UNI_MED, 
+            T1.FCH_ULTCOM, 
+            T1.ULT_COSTO,
+            
+            -- *** CAMPOS AGREGADOS DE T4 (Iguales a los de /filter) ***
+            T4.CAMPLIB1 AS DIAM_INT, 
+            T4.CAMPLIB2 AS DIAM_EXT, 
+            T4.CAMPLIB3 AS ALTURA,
+            T4.CAMPLIB7 AS SECCION, 
+            T4.CAMPLIB15 AS CLA_SYR, 
+            T4.CAMPLIB16 AS CLA_LC,
+            T4.CAMPLIB17 AS SIST_MED, 
+            T4.CAMPLIB19 AS DESC_ECOMM, 
+            T4.CAMPLIB21 AS GENERO,
+            T4.CAMPLIB22 AS FAMILIA,
+            
+            -- PIVOT: Clave alterna del Proveedor '3' (PROV1)
+            MAX(CASE 
+                WHEN TRIM(T2.CVE_CLPV) = '3' 
+                THEN T2.CVE_ALTER 
+                ELSE NULL 
+            END) AS PROV1, 
+            
+            -- PIVOT: Clave alterna del Proveedor '35' (PROV2)
+            MAX(CASE 
+                WHEN TRIM(T2.CVE_CLPV) = '35' 
+                THEN T2.CVE_ALTER 
+                ELSE NULL 
+            END) AS PROV2
+            
+        FROM
+            INVE02 T1
+        LEFT JOIN
+            CVES_ALTER02 T2
+            ON T1.CVE_ART = T2.CVE_ART
+        LEFT JOIN
+            PROV02 T3
+            ON T2.CVE_CLPV = T3.CLAVE
+        -- *** JOIN A LA TABLA DE CAMPOS LIBRES ***
+        LEFT JOIN 
+            INVE_CLIB02 T4
+            ON T1.CVE_ART = T4.CVE_PROD
+        -- **************************************
+        WHERE
+            T2.TIPO = 'P' -- Filtro requerido: Solo claves alternas de TIPO "P"
+            AND (
+                T1.CVE_ART LIKE CAST(? AS VARCHAR(255)) OR       
+                T1.DESCR LIKE CAST(? AS VARCHAR(255)) OR         
+                T2.CVE_ALTER LIKE CAST(? AS VARCHAR(255)) OR     
+                T3.NOMBRE LIKE CAST(? AS VARCHAR(255))
+            )
+        -- AGREGAMOS TODOS LOS CAMPOS DE T1 Y T4 AL GROUP BY
+        GROUP BY
+            T1.CVE_ART, T1.DESCR, T1.UNI_MED, T1.FCH_ULTCOM, T1.ULT_COSTO,
+            T4.CAMPLIB1, T4.CAMPLIB2, T4.CAMPLIB3, T4.CAMPLIB7, T4.CAMPLIB15, 
+            T4.CAMPLIB16, T4.CAMPLIB17, T4.CAMPLIB19, T4.CAMPLIB21, T4.CAMPLIB22
+            
+        ORDER BY
+            T1.CVE_ART;
+    `;
+
+    const params = [likeTerm, likeTerm, likeTerm, likeTerm];
+
+    try {
+        const resultados = await db.query(sql, params);
+
+        if (resultados.length === 0 && searchTerm.length > 0) {
+            return res.status(404).json({ message: `No se encontraron coincidencias para "${searchTerm}".` });
+        }
+        
+        res.json(resultados);
+    } catch (error) {
+        console.error('Error al ejecutar la consulta de búsqueda de claves alternas:', error);
+        res.status(500).json({ error: 'Error interno del servidor al obtener las claves alternas.', detalles: error.message });
+    }
 });
 
 // Nuevo Endpoint para obtener las familias únicas de INVE_CLIB02
@@ -653,357 +602,6 @@ app.get('/familias', async (req, res) => {
     });
   }
 });
-
-// Nuevo Endpoint para búsqueda y filtrado avanzado con paginación
-// Acepta: ?familia=X&diam_int=Y&limit=50&offset=0
-/* app.get('/clavesalternas/filter', async (req, res) => {
-    // 1. Configuración de Paginación
-    const limit = parseInt(req.query.limit) || 100; // Límite por defecto de 100
-    const offset = parseInt(req.query.offset) || 0; // Desplazamiento por defecto 0
-
-    // 2. Definición de Parámetros de Filtrado
-    // Mapeamos los query params a los nombres reales de las columnas en INVE_CLIB02
-    const filterMap = {
-        FAMILIA: 'T4.CAMPLIB22',
-        DIAM_INT: 'T4.CAMPLIB1',
-        DIAM_EXT: 'T4.CAMPLIB2',
-        ALTURA: 'T4.CAMPLIB3',
-        SECCION: 'T4.CAMPLIB7',
-        SIST_MED: 'T4.CAMPLIB17',
-    };
-
-    let whereClauses = [];
-    let params = [];
-    
-    // 3. Construcción Dinámica de la Cláusula WHERE
-    // Siempre incluimos el filtro TIPO = 'P' y construimos los demás dinámicamente.
-    whereClauses.push("T2.TIPO = 'P'");
-
-    for (const alias in filterMap) {
-        // Normalizamos el valor del query (mayúsculas, recortar espacios)
-        let queryValue = req.query[alias.toLowerCase()]; 
-
-        if (queryValue) {
-          // 1. Reemplazar cualquier '+' por un espacio.
-            // 2. Normalizar a mayúsculas y eliminar espacios extra.
-            queryValue = queryValue.replace(/\+/g, ' ').toUpperCase().trim();
-
-            if (queryValue === '') continue; // Ignorar si queda vacío tras limpiar
-
-            const column = filterMap[alias];
-            const likeTerm = `${queryValue}%`;
-            
-            // Usamos LIKE, manteniendo UPPER(TRIM()) y CAST para la máxima fiabilidad
-            whereClauses.push(`UPPER(TRIM(${column})) LIKE CAST(? AS VARCHAR(255))`);
-
-            params.push(likeTerm);
-        }
-    }
-
-    // 4. Creación de la Consulta SQL Final
-    const whereString = whereClauses.length > 0 ? `WHERE ${whereClauses.join(' AND ')}` : '';
-
-    const sql = `
-        SELECT FIRST ${limit} SKIP ${offset} -- <--- Implementación de Paginación Firebird
-            T1.CVE_ART, T1.DESCR, T1.UNI_MED, T1.FCH_ULTCOM, T1.ULT_COSTO,
-            T2.CVE_ALTER, T2.CVE_CLPV, T3.NOMBRE,
-            -- Campos de INVE_CLIB02 T4
-            T4.CAMPLIB1 AS DIAM_INT, T4.CAMPLIB2 AS DIAM_EXT, T4.CAMPLIB3 AS ALTURA,
-            T4.CAMPLIB7 AS SECCION, T4.CAMPLIB15 AS CLA_SYR, T4.CAMPLIB16 AS CLA_LC,
-            T4.CAMPLIB17 AS SIST_MED, T4.CAMPLIB19 AS DESC_ECOMM, T4.CAMPLIB21 AS GENERO,
-            T4.CAMPLIB22 AS FAMILIA
-        FROM
-            INVE02 T1
-        LEFT JOIN CVES_ALTER02 T2 ON T1.CVE_ART = T2.CVE_ART
-        LEFT JOIN PROV02 T3 ON T2.CVE_CLPV = T3.CLAVE
-        LEFT JOIN INVE_CLIB02 T4 ON T1.CVE_ART = T4.CVE_PROD
-        ${whereString}
-        ORDER BY
-            T1.CVE_ART, T2.CVE_ALTER;
-    `;
-
-    try {
-        const resultados = await db.query(sql, params);
-
-        // Si no se recibe ningún parámetro de filtro (solo paginación), se devuelven todos los resultados paginados.
-        // Si no se encuentran resultados con filtros, se devuelve un 404.
-        if (resultados.length === 0 && Object.keys(req.query).some(key => key !== 'limit' && key !== 'offset')) {
-             return res.status(404).json({ message: 'No se encontraron resultados que coincidan con los criterios de filtro.' });
-        }
-
-        res.json(resultados);
-    } catch (error) {
-        console.error('Error al ejecutar la consulta de filtrado de claves alternas:', error);
-        res.status(500).json({ 
-            error: 'Error interno del servidor al obtener las claves alternas por filtro.', 
-            detalles: error.message 
-        });
-    }
-}); */
-
-// Endpoint para búsqueda y filtrado avanzado con paginación
-// Acepta: ?familia=X&diam_int=Y&limit=10&offset=0
-/* app.get('/clavesalternas/filter', async (req, res) => {
-    
-    // 1. Configuración de Paginación
-    // Convertimos los query params a números, con valores por defecto
-    const limit = parseInt(req.query.limit) || 100; // Límite por defecto de 100
-    const offset = parseInt(req.query.offset) || 0; // Desplazamiento por defecto 0
-
-    // 2. Definición de Parámetros de Filtrado
-    // Mapeamos los alias de los query params a los nombres reales de las columnas en INVE_CLIB02
-    const filterMap = {
-        FAMILIA: 'T4.CAMPLIB22',
-        DIAM_INT: 'T4.CAMPLIB1',
-        DIAM_EXT: 'T4.CAMPLIB2',
-        ALTURA: 'T4.CAMPLIB3',
-        SECCION: 'T4.CAMPLIB7',
-        SIST_MED: 'T4.CAMPLIB17',
-    };
-
-    let whereClauses = [];
-    let params = [];
-    
-    // El filtro TIPO = 'P' es obligatorio
-    whereClauses.push("T2.TIPO = 'P'");
-
-    // 3. Construcción Dinámica de la Cláusula WHERE
-    for (const alias in filterMap) {
-        let queryValue = req.query[alias.toLowerCase()]; 
-
-        if (queryValue) {
-            // Limpieza y normalización de la cadena: reemplazamos '+' por espacio y convertimos a mayúsculas
-            queryValue = queryValue.replace(/\+/g, ' ').toUpperCase().trim(); 
-            
-            if (queryValue === '') continue; // Saltar si queda vacío
-
-            const column = filterMap[alias];
-            const likeTerm = `${queryValue}%`;
-            
-            // Lógica robusta: UPPER(TRIM(columna)) LIKE '%?%' con CAST para evitar errores de Firebird
-            whereClauses.push(`UPPER(TRIM(${column})) LIKE CAST(? AS VARCHAR(255))`);
-            params.push(likeTerm);
-        }
-    }
-
-    const whereString = whereClauses.length > 0 ? `WHERE ${whereClauses.join(' AND ')}` : '';
-
-    // 4. Consulta de CONTEO (Total de Registros)
-    const countSql = `
-        SELECT
-            COUNT(DISTINCT T1.CVE_ART) AS TOTAL_REGISTROS
-        FROM
-            INVE02 T1
-        LEFT JOIN CVES_ALTER02 T2 ON T1.CVE_ART = T2.CVE_ART
-        LEFT JOIN PROV02 T3 ON T2.CVE_CLPV = T3.CLAVE
-        LEFT JOIN INVE_CLIB02 T4 ON T1.CVE_ART = T4.CVE_PROD
-        ${whereString};
-    `;
-    
-    // 5. Consulta de DATOS (Paginada)
-    const dataSql = `
-        SELECT FIRST ${limit} SKIP ${offset}
-            T1.CVE_ART, T1.DESCR, T1.UNI_MED, T1.FCH_ULTCOM, T1.ULT_COSTO,
-            T2.CVE_ALTER, T2.CVE_CLPV, T3.NOMBRE,
-            T4.CAMPLIB1 AS DIAM_INT, T4.CAMPLIB2 AS DIAM_EXT, T4.CAMPLIB3 AS ALTURA,
-            T4.CAMPLIB7 AS SECCION, T4.CAMPLIB15 AS CLA_SYR, T4.CAMPLIB16 AS CLA_LC,
-            T4.CAMPLIB17 AS SIST_MED, T4.CAMPLIB19 AS DESC_ECOMM, T4.CAMPLIB21 AS GENERO,
-            T4.CAMPLIB22 AS FAMILIA
-        FROM
-            INVE02 T1
-        LEFT JOIN CVES_ALTER02 T2 ON T1.CVE_ART = T2.CVE_ART
-        LEFT JOIN PROV02 T3 ON T2.CVE_CLPV = T3.CLAVE
-        LEFT JOIN INVE_CLIB02 T4 ON T1.CVE_ART = T4.CVE_PROD
-        ${whereString}
-        ORDER BY
-            T1.CVE_ART, T2.CVE_ALTER;
-    `;
-
-    try {
-        // Ejecutar CONTEO
-        const countResult = await db.query(countSql, params);
-        const totalRegistros = countResult[0].TOTAL_REGISTROS || 0;
-
-        // Manejo de 404 si hay filtros y el conteo es cero
-        if (totalRegistros === 0 && Object.keys(req.query).some(key => key !== 'limit' && key !== 'offset')) {
-            return res.status(404).json({ message: 'No se encontraron resultados que coincidan con los criterios de filtro.' });
-        }
-
-        // Ejecutar DATOS
-        const dataResult = await db.query(dataSql, params);
-
-        // 6. Cálculos y Estructura de Paginación
-        const totalPages = Math.ceil(totalRegistros / limit);
-        const currentPage = Math.floor(offset / limit) + 1;
-        
-        // Devolver la Respuesta con la estructura solicitada
-        res.json({
-            data: dataResult,
-            pagination: {
-                currentPage: currentPage,
-                totalPages: totalPages,
-                totalRecords: totalRegistros, // Incluimos totalRecords para referencia
-                limit: limit // Incluimos el límite para referencia
-            },
-        });
-        
-    } catch (error) {
-        console.error('Error al ejecutar la consulta de filtrado de claves alternas:', error);
-        res.status(500).json({ 
-            error: 'Error interno del servidor al obtener las claves alternas por filtro.', 
-            detalles: error.message 
-        });
-    }
-}); */
-
-// index.js
-
-// ... (otros endpoints)
-
-// Endpoint para búsqueda y filtrado avanzado con paginación
-/* app.get('/clavesalternas/filter', async (req, res) => {
-    
-    // 1. Configuración de Paginación
-    const limit = parseInt(req.query.limit) || 100;
-    const offset = parseInt(req.query.offset) || 0;
-
-    // 2. Definición de Parámetros de Filtrado
-    const filterMap = {
-        FAMILIA: 'T4.CAMPLIB22',
-        DIAM_INT: 'T4.CAMPLIB1',
-        DIAM_EXT: 'T4.CAMPLIB2',
-        ALTURA: 'T4.CAMPLIB3',
-        SECCION: 'T4.CAMPLIB7',
-        SIST_MED: 'T4.CAMPLIB17',
-    };
-
-    // Campos que deben ser tratados como NÚMEROS (para CAST a NUMERIC)
-    const numericDimensionalFields = ['T4.CAMPLIB1', 'T4.CAMPLIB2', 'T4.CAMPLIB3', 'T4.CAMPLIB7'];
-    
-    let whereClauses = [];
-    let params = [];
-    
-    // El filtro TIPO = 'P' es obligatorio
-    whereClauses.push("T2.TIPO = 'P'");
-
-    // 3. Construcción Dinámica de la Cláusula WHERE con limpieza de datos
-    for (const alias in filterMap) {
-        let queryValue = req.query[alias.toLowerCase()]; 
-
-        if (queryValue) {
-            // Limpieza inicial: reemplazamos '+' por espacio y eliminamos espacios extra
-            queryValue = queryValue.replace(/\+/g, ' ').trim(); 
-            
-            if (queryValue === '') continue; 
-
-            const column = filterMap[alias];
-            
-            // --- Lógica para Campos NUMÉRICOS (Dimensiones) ---
-            if (numericDimensionalFields.includes(column)) {
-                
-                // 1. Convertimos la cadena de búsqueda a un número (maneja '2.5' o '2,5')
-                // Usamos .replace(',', '.') para que parseFloat() funcione correctamente
-                const cleanNumericValue = parseFloat(queryValue.replace(',', '.'));
-                
-                if (isNaN(cleanNumericValue)) continue; 
-
-                // Expresión en DB: Limpia espacios, reemplaza coma por punto, y CONVIERTE A NUMÉRICO
-                //const dbColumnExpression = `CAST(REPLACE(TRIM(${column}), ',', '.') AS NUMERIC(15, 5))`;
-                const dbColumnExpression = `CAST(REPLACE(COALESCE(NULLIF(TRIM(${column}), ''), '0'), ',', '.') AS NUMERIC(15, 5))`;
-                
-                // Usamos IGUALDAD (=) para la coincidencia numérica exacta
-                whereClauses.push(`${dbColumnExpression} = CAST(? AS NUMERIC(15, 5))`);
-                params.push(cleanNumericValue); 
-
-            } else {
-                // --- Lógica para Campos de TEXTO (FAMILIA, SIST_MED) ---
-                
-                // 1. Convertimos el valor de búsqueda a mayúsculas
-                const upperQueryValue = queryValue.toUpperCase();
-                const likeTerm = `%${upperQueryValue}%`;
-
-                // Expresión en DB: UPPER(TRIM())
-                const dbColumnExpression = `UPPER(TRIM(${column}))`;
-
-                // Mantenemos LIKE para los campos de texto
-                whereClauses.push(`${dbColumnExpression} LIKE CAST(? AS VARCHAR(255))`);
-                params.push(likeTerm);
-            }
-        }
-    }
-
-    const whereString = whereClauses.length > 0 ? `WHERE ${whereClauses.join(' AND ')}` : '';
-
-    // 4. Consulta de CONTEO y DATOS (se mantienen igual, usando whereString y params)
-    const countSql = `
-        SELECT
-            COUNT(DISTINCT T1.CVE_ART) AS TOTAL_REGISTROS
-        FROM
-            INVE02 T1
-        LEFT JOIN CVES_ALTER02 T2 ON T1.CVE_ART = T2.CVE_ART
-        LEFT JOIN PROV02 T3 ON T2.CVE_CLPV = T3.CLAVE
-        LEFT JOIN INVE_CLIB02 T4 ON T1.CVE_ART = T4.CVE_PROD
-        ${whereString};
-    `;
-    
-    const dataSql = `
-        SELECT FIRST ${limit} SKIP ${offset}
-            T1.CVE_ART, T1.DESCR, T1.UNI_MED, T1.FCH_ULTCOM, T1.ULT_COSTO,
-            T2.CVE_ALTER, T2.CVE_CLPV, T3.NOMBRE,
-            T4.CAMPLIB1 AS DIAM_INT, T4.CAMPLIB2 AS DIAM_EXT, T4.CAMPLIB3 AS ALTURA,
-            T4.CAMPLIB7 AS SECCION, T4.CAMPLIB15 AS CLA_SYR, T4.CAMPLIB16 AS CLA_LC,
-            T4.CAMPLIB17 AS SIST_MED, T4.CAMPLIB19 AS DESC_ECOMM, T4.CAMPLIB21 AS GENERO,
-            T4.CAMPLIB22 AS FAMILIA
-        FROM
-            INVE02 T1
-        LEFT JOIN CVES_ALTER02 T2 ON T1.CVE_ART = T2.CVE_ART
-        LEFT JOIN PROV02 T3 ON T2.CVE_CLPV = T3.CLAVE
-        LEFT JOIN INVE_CLIB02 T4 ON T1.CVE_ART = T4.CVE_PROD
-        ${whereString}
-        ORDER BY
-            T1.CVE_ART, T2.CVE_ALTER;
-    `;
-
-    try {
-        // Ejecutar CONTEO
-        const countResult = await db.query(countSql, params);
-        const totalRegistros = countResult[0].TOTAL_REGISTROS || 0;
-
-        // Manejo de 404 si hay filtros y el conteo es cero
-        if (totalRegistros === 0 && Object.keys(req.query).some(key => key !== 'limit' && key !== 'offset')) {
-            return res.status(404).json({ message: 'No se encontraron resultados que coincidan con los criterios de filtro.' });
-        }
-
-        // Ejecutar DATOS
-        const dataResult = await db.query(dataSql, params);
-
-        // 6. Cálculos y Estructura de Paginación
-        const totalPages = Math.ceil(totalRegistros / limit);
-        const currentPage = Math.floor(offset / limit) + 1;
-        
-        // Devolver la Respuesta con la estructura solicitada
-        res.json({
-            data: dataResult,
-            pagination: {
-                currentPage: currentPage,
-                totalPages: totalPages,
-                totalRecords: totalRegistros,
-                limit: limit
-            },
-        });
-        
-    } catch (error) {
-        console.error('Error al ejecutar la consulta de filtrado de claves alternas:', error);
-        res.status(500).json({ 
-            error: 'Error interno del servidor al obtener las claves alternas por filtro.', 
-            detalles: error.message 
-        });
-    }
-}); */
-
-// index.js
-
-// ... (otros endpoints)
 
 // Endpoint para búsqueda y filtrado avanzado con paginación
 app.get('/clavesalternas/filter', async (req, res) => {
