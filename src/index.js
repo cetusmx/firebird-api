@@ -580,7 +580,7 @@ app.get('/clavesalternas/search', async (req, res) => {
             T1.CVE_ART, T1.DESCR, T1.UNI_MED, T1.FCH_ULTCOM, T1.ULT_COSTO,
             T4.CAMPLIB1, T4.CAMPLIB2, T4.CAMPLIB3, T4.CAMPLIB7, T4.CAMPLIB15, 
             T4.CAMPLIB16, T4.CAMPLIB17, T4.CAMPLIB19, T4.CAMPLIB21, T4.CAMPLIB22,
-            T5.PRECIO // <-- NEW
+            T5.PRECIO 
             
         ORDER BY
             T1.CVE_ART;
@@ -913,7 +913,7 @@ app.get('/clavesalternas/filter', async (req, res) => {
             T1.CVE_ART, T1.DESCR, T1.UNI_MED, T1.FCH_ULTCOM, T1.ULT_COSTO,
             T4.CAMPLIB1, T4.CAMPLIB2, T4.CAMPLIB3, T4.CAMPLIB7, T4.CAMPLIB15, 
             T4.CAMPLIB16, T4.CAMPLIB17, T4.CAMPLIB19, T4.CAMPLIB21, T4.CAMPLIB22,
-            T5.PRECIO // <-- NEW
+            T5.PRECIO
             
         ORDER BY
             T1.CVE_ART;
