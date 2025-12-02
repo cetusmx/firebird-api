@@ -585,9 +585,9 @@ app.get('/clavesalternas/search', async (req, res) => {
     const { query, SUCURSAL } = req.query; 
     const searchTerm = query ? query.toUpperCase().trim() : '';
     const likeTerm = `%${searchTerm}%`;
-    const cvePrecio = SUCURSAL ? parseInt(SUCURSAL) : 1; // cvePrecio es INTEGER
-    
-    // SQL: El primer placeholder (?) es para T5.CVE_PRECIO
+    // Clave de precio (SUCURSAL), usa '1' por defecto si no se especifica
+    const cvePrecio = SUCURSAL ? parseInt(SUCURSAL) : 1; 
+
     const sql = `
         SELECT
             T1.CVE_ART, 
@@ -609,7 +609,7 @@ app.get('/clavesalternas/search', async (req, res) => {
             T4.CAMPLIB21 AS GENERO,
             T4.CAMPLIB22 AS FAMILIA,
             
-            -- CORRECCIÓN FINAL: Usamos MAX() y COALESCE para garantizar 0.00 si es NULL
+            -- FIX DE PRECIO: COALESCE(MAX()) y TRIM en el JOIN
             COALESCE(MAX(T5.PRECIO), 0.00) AS PRECIO, 
             
             -- PIVOT: Clave alterna del Proveedor '3' (PROV1)
@@ -647,6 +647,7 @@ app.get('/clavesalternas/search', async (req, res) => {
         -- JOIN A LA TABLA DE PRECIOS FILTRADO POR SUCURSAL (CVE_PRECIO)
         LEFT JOIN
             PRECIO_X_PROD02 T5
+            -- FIX: Se agrega TRIM() a T5.CVE_PRECIO para manejar el padding de Firebird
             ON T1.CVE_ART = T5.CVE_ART AND TRIM(T5.CVE_PRECIO) = ? 
         -- JOIN A LA TABLA DE EXISTENCIAS
         LEFT JOIN
@@ -670,7 +671,7 @@ app.get('/clavesalternas/search', async (req, res) => {
         ORDER BY
             T1.CVE_ART;
     `;
-    // El orden de los parámetros es: [cvePrecio, likeTerm, likeTerm, likeTerm, likeTerm]
+    // Parámetros: [CVE_PRECIO, LIKE_TERM, LIKE_TERM, LIKE_TERM, LIKE_TERM]
     const params = [cvePrecio, likeTerm, likeTerm, likeTerm, likeTerm]; 
 
     try {
@@ -690,8 +691,6 @@ app.get('/clavesalternas/search', async (req, res) => {
     }
 });
 
-// index.js (Endpoint /clavesalternas/filter)
-
 // Endpoint para búsqueda y filtrado avanzado con paginación
 // Recibe: ?familia=X&diam_int=Y&limit=10&offset=0&SUCURSAL=3
 app.get('/clavesalternas/filter', async (req, res) => {
@@ -702,7 +701,7 @@ app.get('/clavesalternas/filter', async (req, res) => {
     const { SUCURSAL } = req.query; 
     const cvePrecio = SUCURSAL ? parseInt(SUCURSAL) : 1; 
     
-    // Tolerancia (Epsilon) para campos numéricos
+    // Tolerancia (Epsilon) para comparar campos numéricos (NUMERIC(15, 5))
     const NUMERIC_TOLERANCE = 0.00001; 
 
     // 2. Definición de Parámetros de Filtrado
@@ -716,6 +715,7 @@ app.get('/clavesalternas/filter', async (req, res) => {
         SIST_MED: 'T4.CAMPLIB17',
     };
 
+    // Campos que deben ser tratados como NÚMEROS (para CAST a NUMERIC)
     const numericDimensionalFields = ['T4.CAMPLIB1', 'T4.CAMPLIB2', 'T4.CAMPLIB3', 'T4.CAMPLIB7'];
     
     let whereClauses = [];
@@ -725,23 +725,38 @@ app.get('/clavesalternas/filter', async (req, res) => {
 
     // 3. Construcción Dinámica de la Cláusula WHERE
     for (const alias in filterMap) {
+        // FIX: Se define 'column' al inicio del loop para evitar el ReferenceError
+        const column = filterMap[alias]; 
         let queryValue = req.query[alias.toLowerCase()]; 
 
         if (queryValue) {
-            // ... (Lógica de filtrado)
+            queryValue = queryValue.replace(/\+/g, ' ').trim(); 
             
+            if (queryValue === '') continue; 
+
+            // La variable 'column' ya está definida arriba
+            
+            // --- Lógica para Campos NUMÉRICOS (Comparación con Tolerancia) ---
             if (numericDimensionalFields.includes(column)) {
-                // ... (Lógica de comparación numérica con tolerancia)
+                
                 const cleanNumericValue = parseFloat(queryValue.replace(',', '.'));
+                
                 if (isNaN(cleanNumericValue)) continue; 
+
                 const dbColumnExpression = `CAST(REPLACE(COALESCE(NULLIF(TRIM(${column}), ''), '0'), ',', '.') AS NUMERIC(15, 5))`;
+                
+                // Comparación por tolerancia para campos decimales
                 whereClauses.push(`ABS(${dbColumnExpression} - CAST(? AS NUMERIC(15, 5))) <= ${NUMERIC_TOLERANCE}`);
                 params.push(cleanNumericValue); 
+
             } else {
-                // ... (Lógica para Campos de TEXTO)
+                // --- Lógica para Campos de TEXTO (incluye PERFIL) ---
+                
                 const upperQueryValue = queryValue.toUpperCase();
                 const likeTerm = `%${upperQueryValue}%`;
+
                 const dbColumnExpression = `UPPER(TRIM(${column}))`;
+
                 whereClauses.push(`${dbColumnExpression} LIKE CAST(? AS VARCHAR(255))`);
                 params.push(likeTerm);
             }
@@ -750,7 +765,7 @@ app.get('/clavesalternas/filter', async (req, res) => {
 
     const whereString = whereClauses.length > 0 ? `WHERE ${whereClauses.join(' AND ')}` : '';
 
-    // 4. Consulta de CONTEO
+    // 4. Consulta de CONTEO (Utiliza solo los parámetros de filtro)
     const countSql = `
         SELECT
             COUNT(DISTINCT T1.CVE_ART) AS TOTAL_REGISTROS
@@ -773,7 +788,7 @@ app.get('/clavesalternas/filter', async (req, res) => {
             T4.CAMPLIB17 AS SIST_MED, T4.CAMPLIB19 AS DESC_ECOMM, T4.CAMPLIB21 AS GENERO,
             T4.CAMPLIB22 AS FAMILIA,
             
-            -- CORRECCIÓN FINAL: Usamos MAX() y COALESCE para garantizar 0.00 si es NULL
+            -- FIX DE PRECIO: COALESCE(MAX()) y TRIM en el JOIN
             COALESCE(MAX(T5.PRECIO), 0.00) AS PRECIO, 
             
             -- PIVOT: Clave alterna del Proveedor '3' (PROV1)
@@ -803,13 +818,14 @@ app.get('/clavesalternas/filter', async (req, res) => {
         LEFT JOIN PROV02 T3 ON T2.CVE_CLPV = T3.CLAVE
         LEFT JOIN INVE_CLIB02 T4 ON T1.CVE_ART = T4.CVE_PROD
         LEFT JOIN PRECIO_X_PROD02 T5
+            -- FIX: Se agrega TRIM() a T5.CVE_PRECIO para manejar el padding de Firebird
             ON T1.CVE_ART = T5.CVE_ART AND TRIM(T5.CVE_PRECIO) = ? 
         LEFT JOIN MULT02 T6
             ON T1.CVE_ART = T6.CVE_ART
         --
         ${whereString}
         
-        -- Agrupamos por todos los campos de T1 y T4 
+        -- Agrupamos por todos los campos de T1 y T4 (sin T5.PRECIO, que es agregado)
         GROUP BY
             T1.CVE_ART, T1.DESCR, T1.UNI_MED, T1.FCH_ULTCOM, T1.ULT_COSTO,
             T4.CAMPLIB1, T4.CAMPLIB2, T4.CAMPLIB3, T4.CAMPLIB7, T4.CAMPLIB13, T4.CAMPLIB15, 
