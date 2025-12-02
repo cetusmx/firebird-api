@@ -465,7 +465,7 @@ app.get('/clavesalternas', async (req, res) => {
 
 // Endpoint para buscar por clave de artículo, descripción, clave alterna o proveedor.
 // Recibe: ?query=... y ?SUCURSAL=...
-app.get('/clavesalternas/search', async (req, res) => {
+/* app.get('/clavesalternas/search', async (req, res) => {
     
     // 1. Obtención y normalización del término de búsqueda Y SUCURSAL
     const { query, SUCURSAL } = req.query; 
@@ -573,11 +573,126 @@ app.get('/clavesalternas/search', async (req, res) => {
         console.error('Error al ejecutar la consulta de búsqueda de claves alternas:', error);
         res.status(500).json({ error: 'Error interno del servidor al obtener las claves alternas.', detalles: error.message });
     }
+}); */
+
+// index.js (Endpoint /clavesalternas/search)
+
+// Endpoint para buscar por clave de artículo, descripción, clave alterna o proveedor.
+// Recibe: ?query=... y ?SUCURSAL=...
+app.get('/clavesalternas/search', async (req, res) => {
+    
+    // 1. Obtención y normalización del término de búsqueda Y SUCURSAL
+    const { query, SUCURSAL } = req.query; 
+    const searchTerm = query ? query.toUpperCase().trim() : '';
+    const likeTerm = `%${searchTerm}%`;
+    // Clave de precio (SUCURSAL), usa '1' por defecto si no se especifica
+    const cvePrecio = SUCURSAL ? parseInt(SUCURSAL) : 1; 
+
+    const sql = `
+        SELECT
+            T1.CVE_ART, 
+            T1.DESCR, 
+            T1.UNI_MED, 
+            T1.FCH_ULTCOM, 
+            T1.ULT_COSTO,
+            
+            -- CAMPOS DE T4 (INVE_CLIB02)
+            T4.CAMPLIB1 AS DIAM_INT, 
+            T4.CAMPLIB2 AS DIAM_EXT, 
+            T4.CAMPLIB3 AS ALTURA,
+            T4.CAMPLIB7 AS SECCION, 
+            T4.CAMPLIB13 AS PERFIL, -- NUEVO CAMPO AGREGADO
+            T4.CAMPLIB15 AS CLA_SYR, 
+            T4.CAMPLIB16 AS CLA_LC,
+            T4.CAMPLIB17 AS SIST_MED, 
+            T4.CAMPLIB19 AS DESC_ECOMM, 
+            T4.CAMPLIB21 AS GENERO,
+            T4.CAMPLIB22 AS FAMILIA,
+            
+            -- CORRECCIÓN: PRECIO OBTENIDO DE T5 usando MAX()
+            MAX(T5.PRECIO) AS PRECIO, 
+            
+            -- PIVOT: Clave alterna del Proveedor '3' (PROV1)
+            MAX(CASE 
+                WHEN TRIM(T2.CVE_CLPV) = '3' 
+                THEN T2.CVE_ALTER 
+                ELSE NULL 
+            END) AS PROV1, 
+            
+            -- PIVOT: Clave alterna del Proveedor '35' (PROV2)
+            MAX(CASE 
+                WHEN TRIM(T2.CVE_CLPV) = '35' 
+                THEN T2.CVE_ALTER 
+                ELSE NULL 
+            END) AS PROV2,
+
+            -- PIVOT: Existencias por Almacén (T6)
+            MAX(CASE WHEN T6.CVE_ALM = '1' THEN T6.EXIST ELSE NULL END) AS ALM_1_EXIST,
+            MAX(CASE WHEN T6.CVE_ALM = '3' THEN T6.EXIST ELSE NULL END) AS ALM_3_EXIST,
+            MAX(CASE WHEN T6.CVE_ALM = '5' THEN T6.EXIST ELSE NULL END) AS ALM_5_EXIST,
+            MAX(CASE WHEN T6.CVE_ALM = '6' THEN T6.EXIST ELSE NULL END) AS ALM_6_EXIST,
+            MAX(CASE WHEN T6.CVE_ALM = '7' THEN T6.EXIST ELSE NULL END) AS ALM_7_EXIST
+            
+        FROM
+            INVE02 T1
+        LEFT JOIN
+            CVES_ALTER02 T2
+            ON T1.CVE_ART = T2.CVE_ART
+        LEFT JOIN
+            PROV02 T3
+            ON T2.CVE_CLPV = T3.CLAVE
+        LEFT JOIN 
+            INVE_CLIB02 T4
+            ON T1.CVE_ART = T4.CVE_PROD
+        -- JOIN A LA TABLA DE PRECIOS FILTRADO POR SUCURSAL (CVE_PRECIO)
+        LEFT JOIN
+            PRECIO_X_PROD02 T5
+            ON T1.CVE_ART = T5.CVE_ART AND T5.CVE_PRECIO = ? 
+        -- JOIN A LA TABLA DE EXISTENCIAS
+        LEFT JOIN
+            MULT02 T6
+            ON T1.CVE_ART = T6.CVE_ART
+        --
+        WHERE
+            T2.TIPO = 'P' 
+            AND (
+                T1.CVE_ART LIKE CAST(? AS VARCHAR(255)) OR       
+                T1.DESCR LIKE CAST(? AS VARCHAR(255)) OR         
+                T2.CVE_ALTER LIKE CAST(? AS VARCHAR(255)) OR     
+                T3.NOMBRE LIKE CAST(? AS VARCHAR(255))
+            )
+        
+        GROUP BY
+            T1.CVE_ART, T1.DESCR, T1.UNI_MED, T1.FCH_ULTCOM, T1.ULT_COSTO,
+            T4.CAMPLIB1, T4.CAMPLIB2, T4.CAMPLIB3, T4.CAMPLIB7, T4.CAMPLIB13, T4.CAMPLIB15, 
+            T4.CAMPLIB16, T4.CAMPLIB17, T4.CAMPLIB19, T4.CAMPLIB21, T4.CAMPLIB22
+            
+        ORDER BY
+            T1.CVE_ART;
+    `;
+    // Parámetros: [CVE_PRECIO, LIKE_TERM, LIKE_TERM, LIKE_TERM, LIKE_TERM]
+    const params = [cvePrecio, likeTerm, likeTerm, likeTerm, likeTerm]; 
+
+    try {
+        let resultados = await db.query(sql, params);
+
+        if (resultados.length === 0 && searchTerm.length > 0) {
+            return res.status(404).json({ message: `No se encontraron coincidencias para "${searchTerm}".` });
+        }
+        
+        // Post-procesamiento para transformar las existencias
+        resultados = processExistencias(resultados);
+        
+        res.json(resultados);
+    } catch (error) {
+        console.error('Error al ejecutar la consulta de búsqueda de claves alternas:', error);
+        res.status(500).json({ error: 'Error interno del servidor al obtener las claves alternas.', detalles: error.message });
+    }
 });
 
 // Endpoint para búsqueda y filtrado avanzado con paginación
 // Recibe: ?familia=X&diam_int=Y&limit=10&offset=0&SUCURSAL=3
-app.get('/clavesalternas/filter', async (req, res) => {
+/* app.get('/clavesalternas/filter', async (req, res) => {
     
     // 1. Configuración de Paginación y SUCURSAL
     const limit = parseInt(req.query.limit) || 100;
@@ -727,6 +842,189 @@ app.get('/clavesalternas/filter', async (req, res) => {
         let dataResult = await db.query(dataSql, [cvePrecio, ...params]); 
         
         // NEW: Post-procesamiento para transformar las existencias
+        dataResult = processExistencias(dataResult);
+
+        // 6. Cálculos y Estructura de Paginación
+        const totalPages = Math.ceil(totalRegistros / limit);
+        const currentPage = Math.floor(offset / limit) + 1;
+        
+        // Devolver la Respuesta con la estructura solicitada
+        res.json({
+            data: dataResult,
+            pagination: {
+                currentPage: currentPage,
+                totalPages: totalPages,
+                totalRecords: totalRegistros,
+                limit: limit
+            },
+        });
+        
+    } catch (error) {
+        console.error('Error al ejecutar la consulta de filtrado de claves alternas:', error);
+        res.status(500).json({ 
+            error: 'Error interno del servidor al obtener las claves alternas por filtro.', 
+            detalles: error.message 
+        });
+    }
+}); */
+
+// index.js (Endpoint /clavesalternas/filter)
+
+// Endpoint para búsqueda y filtrado avanzado con paginación
+// Recibe: ?familia=X&diam_int=Y&limit=10&offset=0&SUCURSAL=3
+app.get('/clavesalternas/filter', async (req, res) => {
+    
+    // 1. Configuración de Paginación y SUCURSAL
+    const limit = parseInt(req.query.limit) || 100;
+    const offset = parseInt(req.query.offset) || 0;
+    const { SUCURSAL } = req.query; 
+    const cvePrecio = SUCURSAL ? parseInt(SUCURSAL) : 1; 
+    
+    // Tolerancia (Epsilon) para comparar campos numéricos (NUMERIC(15, 5))
+    const NUMERIC_TOLERANCE = 0.00001; 
+
+    // 2. Definición de Parámetros de Filtrado
+    const filterMap = {
+        FAMILIA: 'T4.CAMPLIB22',
+        DIAM_INT: 'T4.CAMPLIB1',
+        DIAM_EXT: 'T4.CAMPLIB2',
+        ALTURA: 'T4.CAMPLIB3',
+        SECCION: 'T4.CAMPLIB7',
+        PERFIL: 'T4.CAMPLIB13', // NUEVO CAMPO AGREGADO AL MAPA DE FILTROS
+        SIST_MED: 'T4.CAMPLIB17',
+    };
+
+    // Campos que deben ser tratados como NÚMEROS (para CAST a NUMERIC)
+    const numericDimensionalFields = ['T4.CAMPLIB1', 'T4.CAMPLIB2', 'T4.CAMPLIB3', 'T4.CAMPLIB7'];
+    
+    let whereClauses = [];
+    let params = [];
+    
+    whereClauses.push("T2.TIPO = 'P'");
+
+    // 3. Construcción Dinámica de la Cláusula WHERE
+    for (const alias in filterMap) {
+        let queryValue = req.query[alias.toLowerCase()]; 
+
+        if (queryValue) {
+            queryValue = queryValue.replace(/\+/g, ' ').trim(); 
+            
+            if (queryValue === '') continue; 
+
+            const column = filterMap[alias];
+            
+            // --- Lógica para Campos NUMÉRICOS (Comparación con Tolerancia) ---
+            if (numericDimensionalFields.includes(column)) {
+                
+                const cleanNumericValue = parseFloat(queryValue.replace(',', '.'));
+                
+                if (isNaN(cleanNumericValue)) continue; 
+
+                const dbColumnExpression = `CAST(REPLACE(COALESCE(NULLIF(TRIM(${column}), ''), '0'), ',', '.') AS NUMERIC(15, 5))`;
+                
+                // Comparación por tolerancia para campos decimales
+                whereClauses.push(`ABS(${dbColumnExpression} - CAST(? AS NUMERIC(15, 5))) <= ${NUMERIC_TOLERANCE}`);
+                params.push(cleanNumericValue); 
+
+            } else {
+                // --- Lógica para Campos de TEXTO (incluye PERFIL) ---
+                
+                const upperQueryValue = queryValue.toUpperCase();
+                const likeTerm = `%${upperQueryValue}%`;
+
+                const dbColumnExpression = `UPPER(TRIM(${column}))`;
+
+                whereClauses.push(`${dbColumnExpression} LIKE CAST(? AS VARCHAR(255))`);
+                params.push(likeTerm);
+            }
+        }
+    }
+
+    const whereString = whereClauses.length > 0 ? `WHERE ${whereClauses.join(' AND ')}` : '';
+
+    // 4. Consulta de CONTEO (Utiliza solo los parámetros de filtro)
+    const countSql = `
+        SELECT
+            COUNT(DISTINCT T1.CVE_ART) AS TOTAL_REGISTROS
+        FROM
+            INVE02 T1
+        LEFT JOIN CVES_ALTER02 T2 ON T1.CVE_ART = T2.CVE_ART
+        LEFT JOIN PROV02 T3 ON T2.CVE_CLPV = T3.CLAVE
+        LEFT JOIN INVE_CLIB02 T4 ON T1.CVE_ART = T4.CVE_PROD
+        ${whereString};
+    `;
+    
+    // 5. Consulta de DATOS (Paginada y Consolidada)
+    const dataSql = `
+        SELECT FIRST ${limit} SKIP ${offset}
+            T1.CVE_ART, T1.DESCR, T1.UNI_MED, T1.FCH_ULTCOM, T1.ULT_COSTO,
+            T4.CAMPLIB1 AS DIAM_INT, T4.CAMPLIB2 AS DIAM_EXT, T4.CAMPLIB3 AS ALTURA,
+            T4.CAMPLIB7 AS SECCION, 
+            T4.CAMPLIB13 AS PERFIL, -- NUEVO CAMPO AGREGADO A SELECT
+            T4.CAMPLIB15 AS CLA_SYR, T4.CAMPLIB16 AS CLA_LC,
+            T4.CAMPLIB17 AS SIST_MED, T4.CAMPLIB19 AS DESC_ECOMM, T4.CAMPLIB21 AS GENERO,
+            T4.CAMPLIB22 AS FAMILIA,
+            
+            -- CORRECCIÓN: PRECIO AGREGADO DE T5 usando MAX()
+            MAX(T5.PRECIO) AS PRECIO, 
+            
+            -- PIVOT: Clave alterna del Proveedor '3' (PROV1)
+            MAX(CASE 
+                WHEN TRIM(T2.CVE_CLPV) = '3' 
+                THEN T2.CVE_ALTER 
+                ELSE NULL 
+            END) AS PROV1, 
+            
+            -- PIVOT: Clave alterna del Proveedor '35' (PROV2)
+            MAX(CASE 
+                WHEN TRIM(T2.CVE_CLPV) = '35' 
+                THEN T2.CVE_ALTER 
+                ELSE NULL 
+            END) AS PROV2,
+            
+            -- PIVOT: Existencias por Almacén (T6)
+            MAX(CASE WHEN T6.CVE_ALM = '1' THEN T6.EXIST ELSE NULL END) AS ALM_1_EXIST,
+            MAX(CASE WHEN T6.CVE_ALM = '3' THEN T6.EXIST ELSE NULL END) AS ALM_3_EXIST,
+            MAX(CASE WHEN T6.CVE_ALM = '5' THEN T6.EXIST ELSE NULL END) AS ALM_5_EXIST,
+            MAX(CASE WHEN T6.CVE_ALM = '6' THEN T6.EXIST ELSE NULL END) AS ALM_6_EXIST,
+            MAX(CASE WHEN T6.CVE_ALM = '7' THEN T6.EXIST ELSE NULL END) AS ALM_7_EXIST
+            
+        FROM
+            INVE02 T1
+        LEFT JOIN CVES_ALTER02 T2 ON T1.CVE_ART = T2.CVE_ART
+        LEFT JOIN PROV02 T3 ON T2.CVE_CLPV = T3.CLAVE
+        LEFT JOIN INVE_CLIB02 T4 ON T1.CVE_ART = T4.CVE_PROD
+        LEFT JOIN PRECIO_X_PROD02 T5
+            ON T1.CVE_ART = T5.CVE_ART AND T5.CVE_PRECIO = ? 
+        LEFT JOIN MULT02 T6
+            ON T1.CVE_ART = T6.CVE_ART
+        --
+        ${whereString}
+        
+        -- Agrupamos por todos los campos de T1 y T4 (sin T5.PRECIO)
+        GROUP BY
+            T1.CVE_ART, T1.DESCR, T1.UNI_MED, T1.FCH_ULTCOM, T1.ULT_COSTO,
+            T4.CAMPLIB1, T4.CAMPLIB2, T4.CAMPLIB3, T4.CAMPLIB7, T4.CAMPLIB13, T4.CAMPLIB15, 
+            T4.CAMPLIB16, T4.CAMPLIB17, T4.CAMPLIB19, T4.CAMPLIB21, T4.CAMPLIB22
+            
+        ORDER BY
+            T1.CVE_ART;
+    `;
+
+    try {
+        // Ejecutar CONTEO
+        const countResult = await db.query(countSql, params);
+        const totalRegistros = countResult[0].TOTAL_REGISTROS || 0;
+
+        // Manejo de 404
+        if (totalRegistros === 0 && Object.keys(req.query).some(key => key !== 'limit' && key !== 'offset')) {
+            return res.status(404).json({ message: 'No se encontraron resultados que coincidan con los criterios de filtro.' });
+        }
+
+        // Ejecutar DATOS: cvePrecio DEBE ir al inicio del array de parámetros
+        let dataResult = await db.query(dataSql, [cvePrecio, ...params]); 
+        
+        // Post-procesamiento para transformar las existencias
         dataResult = processExistencias(dataResult);
 
         // 6. Cálculos y Estructura de Paginación
