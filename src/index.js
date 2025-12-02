@@ -1030,6 +1030,7 @@ app.get('/clavesalternas/filter', async (req, res) => {
         // 6. Cálculos y Estructura de Paginación
         const totalPages = Math.ceil(totalRegistros / limit);
         const currentPage = Math.floor(offset / limit) + 1;
+        console.log(dataResult);
         
         // Devolver la Respuesta con la estructura solicitada
         res.json({
