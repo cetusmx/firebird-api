@@ -486,6 +486,7 @@ app.get('/clavesalternas/search', async (req, res) => {
             T4.CAMPLIB2 AS DIAM_EXT, 
             T4.CAMPLIB3 AS ALTURA,
             T4.CAMPLIB7 AS SECCION, 
+            T4.CAMPLIB13 AS PERFIL, 
             T4.CAMPLIB15 AS CLA_SYR, 
             T4.CAMPLIB16 AS CLA_LC,
             T4.CAMPLIB17 AS SIST_MED, 
@@ -660,7 +661,7 @@ app.get('/clavesalternas/filter', async (req, res) => {
         SELECT FIRST ${limit} SKIP ${offset}
             T1.CVE_ART, T1.DESCR, T1.UNI_MED, T1.FCH_ULTCOM, T1.ULT_COSTO,
             T4.CAMPLIB1 AS DIAM_INT, T4.CAMPLIB2 AS DIAM_EXT, T4.CAMPLIB3 AS ALTURA,
-            T4.CAMPLIB7 AS SECCION, T4.CAMPLIB15 AS CLA_SYR, T4.CAMPLIB16 AS CLA_LC,
+            T4.CAMPLIB7 AS SECCION, T4.CAMPLIB13 AS PERFIL, T4.CAMPLIB15 AS CLA_SYR, T4.CAMPLIB16 AS CLA_LC,
             T4.CAMPLIB17 AS SIST_MED, T4.CAMPLIB19 AS DESC_ECOMM, T4.CAMPLIB21 AS GENERO,
             T4.CAMPLIB22 AS FAMILIA,
             
@@ -704,7 +705,7 @@ app.get('/clavesalternas/filter', async (req, res) => {
         -- Agrupamos por todos los campos de T1, T4 y T5.PRECIO
         GROUP BY
             T1.CVE_ART, T1.DESCR, T1.UNI_MED, T1.FCH_ULTCOM, T1.ULT_COSTO,
-            T4.CAMPLIB1, T4.CAMPLIB2, T4.CAMPLIB3, T4.CAMPLIB7, T4.CAMPLIB15, 
+            T4.CAMPLIB1, T4.CAMPLIB2, T4.CAMPLIB3, T4.CAMPLIB7, T4.CAMPLIB13, T4.CAMPLIB15, 
             T4.CAMPLIB16, T4.CAMPLIB17, T4.CAMPLIB19, T4.CAMPLIB21, T4.CAMPLIB22,
             T5.PRECIO 
             
