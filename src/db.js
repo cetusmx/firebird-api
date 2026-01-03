@@ -13,12 +13,12 @@ const options = {
 };
 
 // --- DEPURACION ---
-console.log("Configuración detectada:", {
+/* console.log("Configuración detectada:", {
   host: options.host,
   user: options.user,
   db: options.database,
   pass: options.password ? "****" : "UNDEFINED"
-});
+}); */
 // ------------------------------
 
 const pool = Firebird.pool(5, options); // El 5 es el tamaño del pool
