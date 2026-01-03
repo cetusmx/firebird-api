@@ -1,9 +1,9 @@
 // src/index.js
+require('dotenv').config();
 const express = require('express');
 const morgan = require('morgan');
 const db = require('./db');
 const cors = require('cors');
-require('dotenv').config();
 
 const app = express();
 const port = process.env.API_PORT || 3010;
