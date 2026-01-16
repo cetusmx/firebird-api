@@ -781,72 +781,57 @@ app.get('/clavesalternas/filter-ranges', async (req, res) => {
     const { SUCURSAL } = req.query; 
     const cvePrecio = SUCURSAL ? parseInt(SUCURSAL) : 1; 
 
-    const filterMap = {
-        FAMILIA: 'T4.CAMPLIB22',
+    // Definimos las dimensiones que SIEMPRE vienen en par min/max
+    const dimensionalFields = {
         DIAM_INT: 'T4.CAMPLIB1',
         DIAM_EXT: 'T4.CAMPLIB2',
         ALTURA: 'T4.CAMPLIB3',
-        SECCION: 'T4.CAMPLIB7',
-        PERFIL: 'T4.CAMPLIB13', 
-        SIST_MED: 'T4.CAMPLIB17',
-        COLOCACION: 'T4.CAMPLIB28',
-        LINEA: 'T1.LIN_PROD'
+        SECCION: 'T4.CAMPLIB7'
     };
 
-    const numericDimensionalFields = ['T4.CAMPLIB1', 'T4.CAMPLIB2', 'T4.CAMPLIB3', 'T4.CAMPLIB7'];
+    // Otros filtros que siguen siendo de texto o búsqueda parcial
+    const extraFilters = {
+        FAMILIA: 'T4.CAMPLIB22',
+        COLOCACION: 'T4.CAMPLIB28',
+        LINEA: 'T1.LIN_PROD',
+        PERFIL: 'T4.CAMPLIB13',
+        SIST_MED: 'T4.CAMPLIB17'
+    };
     
-    let whereClauses = [];
+    let whereClauses = ["T2.TIPO = 'P'"];
     let params = [];
-    whereClauses.push("T2.TIPO = 'P'");
 
-    for (const alias in filterMap) {
-        const column = filterMap[alias];
-        const isNumeric = numericDimensionalFields.includes(column);
+    // 1. Lógica de Rangos con BETWEEN para dimensiones
+    for (const alias in dimensionalFields) {
+        const column = dimensionalFields[alias];
         const lowerAlias = alias.toLowerCase();
+        
+        const valMin = req.query[`${lowerAlias}_min`];
+        const valMax = req.query[`${lowerAlias}_max`];
 
-        if (isNumeric) {
-            // Lógica de Rangos para campos numéricos
-            const valMin = req.query[`${lowerAlias}_min` || `${lowerAlias}min` ];
-            const valMax = req.query[`${lowerAlias}_max` || `${lowerAlias}max` ];
-
-            // Expresión para convertir el texto de Firebird a número real
+        if (valMin !== undefined && valMax !== undefined) {
+            // Convertimos el campo de la DB (texto con comas) a numérico para comparar
             const dbNum = `CAST(REPLACE(COALESCE(NULLIF(TRIM(${column}), ''), '0'), ',', '.') AS NUMERIC(15, 5))`;
-
-            if (valMin) {
-                whereClauses.push(`${dbNum} >= CAST(? AS NUMERIC(15, 5))`);
-                params.push(parseFloat(valMin.replace(',', '.')));
-            }
-            if (valMax) {
-                whereClauses.push(`${dbNum} <= CAST(? AS NUMERIC(15, 5))`);
-                params.push(parseFloat(valMax.replace(',', '.')));
-            }
             
-            // Si el usuario envía el parámetro exacto (sin _min/_max), mantenemos compatibilidad
-            const valExact = req.query[lowerAlias];
-            if (valExact && !valMin && !valMax) {
-                const cleanVal = parseFloat(valExact.replace(',', '.'));
-                whereClauses.push(`ABS(${dbNum} - CAST(? AS NUMERIC(15, 5))) <= 0.00001`);
-                params.push(cleanVal);
-            }
-
-        } else {
-            // Lógica normal de texto para los demás campos
-            let queryValue = req.query[lowerAlias];
-            if (queryValue) {
-                const likeTerm = `%${queryValue.toUpperCase().trim()}%`;
-                whereClauses.push(`UPPER(TRIM(${column})) LIKE CAST(? AS VARCHAR(255))`);
-                params.push(likeTerm);
-            }
+            whereClauses.push(`${dbNum} BETWEEN CAST(? AS NUMERIC(15, 5)) AND CAST(? AS NUMERIC(15, 5))`);
+            params.push(parseFloat(valMin.replace(',', '.')));
+            params.push(parseFloat(valMax.replace(',', '.')));
         }
     }
 
-    const whereString = whereClauses.length > 0 ? `WHERE ${whereClauses.join(' AND ')}` : '';
+    // 2. Lógica para filtros extra (Texto)
+    for (const alias in extraFilters) {
+        const column = extraFilters[alias];
+        const val = req.query[alias.toLowerCase()];
+        if (val) {
+            whereClauses.push(`UPPER(TRIM(${column})) LIKE ?`);
+            params.push(`%${val.toUpperCase().trim()}%`);
+        }
+    }
 
-    // Reutilizamos la misma estructura de consultas que filter
-    const countSql = `SELECT COUNT(DISTINCT T1.CVE_ART) AS TOTAL_REGISTROS FROM INVE02 T1 
-                      LEFT JOIN CVES_ALTER02 T2 ON T1.CVE_ART = T2.CVE_ART 
-                      LEFT JOIN INVE_CLIB02 T4 ON T1.CVE_ART = T4.CVE_PROD ${whereString}`;
-    
+    const whereString = `WHERE ${whereClauses.join(' AND ')}`;
+
+    // Consulta de Datos (Incluyendo LIN_PROD, COLOCACION y Almacenes de Empresa 2)
     const dataSql = `
         SELECT FIRST ${limit} SKIP ${offset}
             T1.CVE_ART, T1.DESCR, T1.UNI_MED, T1.FCH_ULTCOM, T1.ULT_COSTO, T1.LIN_PROD,
@@ -873,25 +858,47 @@ app.get('/clavesalternas/filter-ranges', async (req, res) => {
         ORDER BY T1.CVE_ART;
     `;
 
+    // Consulta de Conteo para paginación
+    const countSql = `
+        SELECT COUNT(DISTINCT T1.CVE_ART) AS TOTAL_REGISTROS
+        FROM INVE02 T1
+        LEFT JOIN CVES_ALTER02 T2 ON T1.CVE_ART = T2.CVE_ART
+        LEFT JOIN INVE_CLIB02 T4 ON T1.CVE_ART = T4.CVE_PROD
+        ${whereString};
+    `;
+
     try {
         const countRes = await db.query(countSql, params);
-        const totalRecords = countRes[0].TOTAL_REGISTROS || 0;
-        let dataResult = await db.query(dataSql, [cvePrecio, ...params]);
+        const totalRegistros = countRes[0].TOTAL_REGISTROS || 0;
 
-        // Enriquecer con Fresnillo2 (DB3)
+        let dataResult = await db.query(dataSql, [cvePrecio, ...params]); 
+
+        // 3. Enriquecimiento con Empresa 3 (Fresnillo2 - Almacén 3)
         if (dataResult.length > 0) {
             const ids = dataResult.map(item => item.CVE_ART.trim());
             const sql3 = `SELECT TRIM(CVE_ART) AS ART, EXIST FROM MULT03 WHERE CVE_ALM = 3 AND CVE_ART IN (${ids.map(() => '?').join(',')})`;
+            
             try {
                 const res3 = await db3.query(sql3, ids);
                 const map3 = {};
                 res3.forEach(r => map3[r.ART] = r.EXIST);
                 dataResult = dataResult.map(item => ({ ...item, ALM_10_EXIST: map3[item.CVE_ART.trim()] || 0 }));
-            } catch (e) { dataResult = dataResult.map(item => ({ ...item, ALM_10_EXIST: 0 })); }
+            } catch (err3) {
+                dataResult = dataResult.map(item => ({ ...item, ALM_10_EXIST: 0 }));
+            }
         }
 
         dataResult = processExistencias(dataResult);
-        res.json({ data: dataResult, pagination: { totalRecords, totalPages: Math.ceil(totalRecords / limit), currentPage: Math.floor(offset / limit) + 1, limit } });
+
+        res.json({
+            data: dataResult,
+            pagination: {
+                totalRecords: totalRegistros,
+                totalPages: Math.ceil(totalRegistros / limit),
+                currentPage: Math.floor(offset / limit) + 1,
+                limit
+            }
+        });
     } catch (error) {
         res.status(500).json({ error: error.message });
     }
