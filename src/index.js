@@ -775,6 +775,128 @@ app.get('/clavesalternas/search', async (req, res) => {
     }
 });
 
+app.get('/clavesalternas/filter-ranges', async (req, res) => {
+    const limit = parseInt(req.query.limit) || 100;
+    const offset = parseInt(req.query.offset) || 0;
+    const { SUCURSAL } = req.query; 
+    const cvePrecio = SUCURSAL ? parseInt(SUCURSAL) : 1; 
+
+    const filterMap = {
+        FAMILIA: 'T4.CAMPLIB22',
+        DIAM_INT: 'T4.CAMPLIB1',
+        DIAM_EXT: 'T4.CAMPLIB2',
+        ALTURA: 'T4.CAMPLIB3',
+        SECCION: 'T4.CAMPLIB7',
+        PERFIL: 'T4.CAMPLIB13', 
+        SIST_MED: 'T4.CAMPLIB17',
+        COLOCACION: 'T4.CAMPLIB28',
+        LINEA: 'T1.LIN_PROD'
+    };
+
+    const numericDimensionalFields = ['T4.CAMPLIB1', 'T4.CAMPLIB2', 'T4.CAMPLIB3', 'T4.CAMPLIB7'];
+    
+    let whereClauses = [];
+    let params = [];
+    whereClauses.push("T2.TIPO = 'P'");
+
+    for (const alias in filterMap) {
+        const column = filterMap[alias];
+        const isNumeric = numericDimensionalFields.includes(column);
+        const lowerAlias = alias.toLowerCase();
+
+        if (isNumeric) {
+            // Lógica de Rangos para campos numéricos
+            const valMin = req.query[`${lowerAlias}_min` || `${lowerAlias}min` ];
+            const valMax = req.query[`${lowerAlias}_max` || `${lowerAlias}max` ];
+
+            // Expresión para convertir el texto de Firebird a número real
+            const dbNum = `CAST(REPLACE(COALESCE(NULLIF(TRIM(${column}), ''), '0'), ',', '.') AS NUMERIC(15, 5))`;
+
+            if (valMin) {
+                whereClauses.push(`${dbNum} >= CAST(? AS NUMERIC(15, 5))`);
+                params.push(parseFloat(valMin.replace(',', '.')));
+            }
+            if (valMax) {
+                whereClauses.push(`${dbNum} <= CAST(? AS NUMERIC(15, 5))`);
+                params.push(parseFloat(valMax.replace(',', '.')));
+            }
+            
+            // Si el usuario envía el parámetro exacto (sin _min/_max), mantenemos compatibilidad
+            const valExact = req.query[lowerAlias];
+            if (valExact && !valMin && !valMax) {
+                const cleanVal = parseFloat(valExact.replace(',', '.'));
+                whereClauses.push(`ABS(${dbNum} - CAST(? AS NUMERIC(15, 5))) <= 0.00001`);
+                params.push(cleanVal);
+            }
+
+        } else {
+            // Lógica normal de texto para los demás campos
+            let queryValue = req.query[lowerAlias];
+            if (queryValue) {
+                const likeTerm = `%${queryValue.toUpperCase().trim()}%`;
+                whereClauses.push(`UPPER(TRIM(${column})) LIKE CAST(? AS VARCHAR(255))`);
+                params.push(likeTerm);
+            }
+        }
+    }
+
+    const whereString = whereClauses.length > 0 ? `WHERE ${whereClauses.join(' AND ')}` : '';
+
+    // Reutilizamos la misma estructura de consultas que filter
+    const countSql = `SELECT COUNT(DISTINCT T1.CVE_ART) AS TOTAL_REGISTROS FROM INVE02 T1 
+                      LEFT JOIN CVES_ALTER02 T2 ON T1.CVE_ART = T2.CVE_ART 
+                      LEFT JOIN INVE_CLIB02 T4 ON T1.CVE_ART = T4.CVE_PROD ${whereString}`;
+    
+    const dataSql = `
+        SELECT FIRST ${limit} SKIP ${offset}
+            T1.CVE_ART, T1.DESCR, T1.UNI_MED, T1.FCH_ULTCOM, T1.ULT_COSTO, T1.LIN_PROD,
+            T4.CAMPLIB1 AS DIAM_INT, T4.CAMPLIB2 AS DIAM_EXT, T4.CAMPLIB3 AS ALTURA,
+            T4.CAMPLIB7 AS SECCION, T4.CAMPLIB13 AS PERFIL, 
+            T4.CAMPLIB15 AS CLA_SYR, T4.CAMPLIB16 AS CLA_LC,
+            T4.CAMPLIB17 AS SIST_MED, T4.CAMPLIB19 AS DESC_ECOMM, T4.CAMPLIB21 AS GENERO,
+            T4.CAMPLIB22 AS FAMILIA, T4.CAMPLIB28 AS COLOCACION,
+            COALESCE(MAX(T5.PRECIO), 0.00) AS PRECIO, 
+            MAX(CASE WHEN TRIM(T2.CVE_CLPV) = '3' THEN T2.CVE_ALTER ELSE NULL END) AS PROV1, 
+            MAX(CASE WHEN TRIM(T2.CVE_CLPV) = '35' THEN T2.CVE_ALTER ELSE NULL END) AS PROV2,
+            MAX(CASE WHEN T6.CVE_ALM = '1' THEN T6.EXIST ELSE NULL END) AS ALM_1_EXIST,
+            MAX(CASE WHEN T6.CVE_ALM = '3' THEN T6.EXIST ELSE NULL END) AS ALM_3_EXIST,
+            MAX(CASE WHEN T6.CVE_ALM = '5' THEN T6.EXIST ELSE NULL END) AS ALM_5_EXIST,
+            MAX(CASE WHEN T6.CVE_ALM = '6' THEN T6.EXIST ELSE NULL END) AS ALM_6_EXIST,
+            MAX(CASE WHEN T6.CVE_ALM = '7' THEN T6.EXIST ELSE NULL END) AS ALM_7_EXIST
+        FROM INVE02 T1
+        LEFT JOIN CVES_ALTER02 T2 ON T1.CVE_ART = T2.CVE_ART
+        LEFT JOIN INVE_CLIB02 T4 ON T1.CVE_ART = T4.CVE_PROD
+        LEFT JOIN PRECIO_X_PROD02 T5 ON T1.CVE_ART = T5.CVE_ART AND TRIM(T5.CVE_PRECIO) = ? 
+        LEFT JOIN MULT02 T6 ON T1.CVE_ART = T6.CVE_ART
+        ${whereString}
+        GROUP BY 1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18
+        ORDER BY T1.CVE_ART;
+    `;
+
+    try {
+        const countRes = await db.query(countSql, params);
+        const totalRecords = countRes[0].TOTAL_REGISTROS || 0;
+        let dataResult = await db.query(dataSql, [cvePrecio, ...params]);
+
+        // Enriquecer con Fresnillo2 (DB3)
+        if (dataResult.length > 0) {
+            const ids = dataResult.map(item => item.CVE_ART.trim());
+            const sql3 = `SELECT TRIM(CVE_ART) AS ART, EXIST FROM MULT03 WHERE CVE_ALM = 3 AND CVE_ART IN (${ids.map(() => '?').join(',')})`;
+            try {
+                const res3 = await db3.query(sql3, ids);
+                const map3 = {};
+                res3.forEach(r => map3[r.ART] = r.EXIST);
+                dataResult = dataResult.map(item => ({ ...item, ALM_10_EXIST: map3[item.CVE_ART.trim()] || 0 }));
+            } catch (e) { dataResult = dataResult.map(item => ({ ...item, ALM_10_EXIST: 0 })); }
+        }
+
+        dataResult = processExistencias(dataResult);
+        res.json({ data: dataResult, pagination: { totalRecords, totalPages: Math.ceil(totalRecords / limit), currentPage: Math.floor(offset / limit) + 1, limit } });
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
 
 // Endpoint para búsqueda y filtrado avanzado con paginación
 // Recibe: ?familia=X&diam_int=Y&limit=10&offset=0&SUCURSAL=3
