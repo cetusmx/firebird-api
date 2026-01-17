@@ -332,7 +332,7 @@ app.get('/precios', async (req, res) => {
   }
 });
 
-app.get('/familias', async (req, res) => {
+/* app.get('/familias', async (req, res) => {
   const sql = `
     SELECT DISTINCT
       CAMPLIB22 AS FAMILIA
@@ -351,6 +351,45 @@ app.get('/familias', async (req, res) => {
     res.json(familias);
   } catch (error) {
     console.error('Error al ejecutar la consulta de familias únicas:', error);
+    res.status(500).json({ 
+        error: 'Error interno del servidor al obtener las familias.', 
+        detalles: error.message 
+    });
+  }
+}); */
+
+app.get('/familias', async (req, res) => {
+  // Lista de familias a excluir
+  const excluir = [
+    'ACC. ANCLAJE', 'ADHES', 'AJUSTADOR', 'ANILLO', 'BARRA', 'BUJE', 
+    'COMP. SIST. HIDR.', 'COMPRESOR', 'CONEXIONES', 'COPA', 'COPA PISTON', 
+    'DRING', 'EMBOLOS', 'ESTOPEROS', 'ESTUC', 'HERRAM', 'KIT', 'LUBRIC', 
+    'MANGUERAS', 'SELLO MECANICO', 'SUJETADOR', 'TAPAS', 'TUBO'
+  ];
+
+  // Generamos los placeholders (?, ?, ...) para la consulta
+  const placeholders = excluir.map(() => '?').join(', ');
+
+  const sql = `
+    SELECT DISTINCT
+      CAMPLIB22 AS FAMILIA
+    FROM
+      INVE_CLIB02
+    WHERE
+      CAMPLIB22 IS NOT NULL 
+      AND CAMPLIB22 <> ''
+      AND UPPER(TRIM(CAMPLIB22)) NOT IN (${placeholders})
+    ORDER BY
+      FAMILIA;
+  `;
+
+  try {
+    // Pasamos el array de exclusión como parámetros para mayor seguridad
+    const familias = await db.query(sql, excluir);
+    
+    res.json(familias);
+  } catch (error) {
+    console.error('Error al ejecutar la consulta de familias filtradas:', error);
     res.status(500).json({ 
         error: 'Error interno del servidor al obtener las familias.', 
         detalles: error.message 
@@ -464,234 +503,6 @@ app.get('/clavesalternas', async (req, res) => {
     });
   }
 });
-
-// Endpoint para buscar por clave de artículo, descripción, clave alterna o proveedor.
-// Recibe: ?query=... y ?SUCURSAL=...
-/* app.get('/clavesalternas/search', async (req, res) => {
-    
-    // 1. Obtención y normalización del término de búsqueda Y SUCURSAL
-    const { query, SUCURSAL } = req.query; 
-    const searchTerm = query ? query.toUpperCase().trim() : '';
-    const likeTerm = `%${searchTerm}%`;
-    const cvePrecio = SUCURSAL ? parseInt(SUCURSAL) : 1; 
-
-    const sql = `
-        SELECT
-            T1.CVE_ART, 
-            T1.DESCR, 
-            T1.UNI_MED, 
-            T1.FCH_ULTCOM, 
-            T1.ULT_COSTO,
-            
-            -- CAMPOS DE T4 (INVE_CLIB02)
-            T4.CAMPLIB1 AS DIAM_INT, 
-            T4.CAMPLIB2 AS DIAM_EXT, 
-            T4.CAMPLIB3 AS ALTURA,
-            T4.CAMPLIB7 AS SECCION, 
-            T4.CAMPLIB13 AS PERFIL, 
-            T4.CAMPLIB15 AS CLA_SYR, 
-            T4.CAMPLIB16 AS CLA_LC,
-            T4.CAMPLIB17 AS SIST_MED, 
-            T4.CAMPLIB19 AS DESC_ECOMM, 
-            T4.CAMPLIB21 AS GENERO,
-            T4.CAMPLIB22 AS FAMILIA,
-            
-            -- PRECIO OBTENIDO DE T5
-            T5.PRECIO AS PRECIO, 
-            
-            -- PIVOT: Clave alterna del Proveedor '3' (PROV1)
-            MAX(CASE 
-                WHEN TRIM(T2.CVE_CLPV) = '3' 
-                THEN T2.CVE_ALTER 
-                ELSE NULL 
-            END) AS PROV1, 
-            
-            -- PIVOT: Clave alterna del Proveedor '35' (PROV2)
-            MAX(CASE 
-                WHEN TRIM(T2.CVE_CLPV) = '35' 
-                THEN T2.CVE_ALTER 
-                ELSE NULL 
-            END) AS PROV2,
-            
-            -- PIVOT: Existencias por Almacén (T6)
-            MAX(CASE WHEN T6.CVE_ALM = '1' THEN T6.EXIST ELSE NULL END) AS ALM_1_EXIST,
-            MAX(CASE WHEN T6.CVE_ALM = '3' THEN T6.EXIST ELSE NULL END) AS ALM_3_EXIST,
-            MAX(CASE WHEN T6.CVE_ALM = '5' THEN T6.EXIST ELSE NULL END) AS ALM_5_EXIST,
-            MAX(CASE WHEN T6.CVE_ALM = '6' THEN T6.EXIST ELSE NULL END) AS ALM_6_EXIST,
-            MAX(CASE WHEN T6.CVE_ALM = '7' THEN T6.EXIST ELSE NULL END) AS ALM_7_EXIST
-            
-        FROM
-            INVE02 T1
-        LEFT JOIN
-            CVES_ALTER02 T2
-            ON T1.CVE_ART = T2.CVE_ART
-        LEFT JOIN
-            PROV02 T3
-            ON T2.CVE_CLPV = T3.CLAVE
-        LEFT JOIN 
-            INVE_CLIB02 T4
-            ON T1.CVE_ART = T4.CVE_PROD
-        LEFT JOIN
-            PRECIO_X_PROD02 T5
-            ON T1.CVE_ART = T5.CVE_ART AND T5.CVE_PRECIO = ? 
-        -- NEW: JOIN A LA TABLA DE EXISTENCIAS
-        LEFT JOIN
-            MULT02 T6
-            ON T1.CVE_ART = T6.CVE_ART
-        --
-        WHERE
-            T2.TIPO = 'P' 
-            AND (
-                T1.CVE_ART LIKE CAST(? AS VARCHAR(255)) OR       
-                T1.DESCR LIKE CAST(? AS VARCHAR(255)) OR         
-                T2.CVE_ALTER LIKE CAST(? AS VARCHAR(255)) OR     
-                T3.NOMBRE LIKE CAST(? AS VARCHAR(255))
-            )
-        
-        GROUP BY
-            T1.CVE_ART, T1.DESCR, T1.UNI_MED, T1.FCH_ULTCOM, T1.ULT_COSTO,
-            T4.CAMPLIB1, T4.CAMPLIB2, T4.CAMPLIB3, T4.CAMPLIB7, T4.CAMPLIB13, T4.CAMPLIB15, 
-            T4.CAMPLIB16, T4.CAMPLIB17, T4.CAMPLIB19, T4.CAMPLIB21, T4.CAMPLIB22,
-            T5.PRECIO 
-            
-        ORDER BY
-            T1.CVE_ART;
-    `;
-    
-    const params = [cvePrecio, likeTerm, likeTerm, likeTerm, likeTerm]; 
-
-    try {
-        let resultados = await db.query(sql, params);
-
-        if (resultados.length === 0 && searchTerm.length > 0) {
-            return res.status(404).json({ message: `No se encontraron coincidencias para "${searchTerm}".` });
-        }
-        
-        // NEW: Post-procesamiento para transformar las existencias
-        resultados = processExistencias(resultados);
-        
-        res.json(resultados);
-    } catch (error) {
-        console.error('Error al ejecutar la consulta de búsqueda de claves alternas:', error);
-        res.status(500).json({ error: 'Error interno del servidor al obtener las claves alternas.', detalles: error.message });
-    }
-}); */
-
-// index.js (Endpoint /clavesalternas/search)
-
-// Endpoint para buscar por clave de artículo, descripción, clave alterna o proveedor.
-// Recibe: ?query=... y ?SUCURSAL=...
-/* app.get('/clavesalternas/search', async (req, res) => {
-    
-    // 1. Obtención y normalización del término de búsqueda Y SUCURSAL
-    const { query, SUCURSAL } = req.query; 
-    const searchTerm = query ? query.toUpperCase().trim() : '';
-    const likeTerm = `%${searchTerm}%`;
-    // Clave de precio (SUCURSAL), usa '1' por defecto si no se especifica
-    const cvePrecio = SUCURSAL ? parseInt(SUCURSAL) : 1; 
-
-    const sql = `
-        SELECT
-            T1.CVE_ART, 
-            T1.DESCR, 
-            T1.UNI_MED, 
-            T1.FCH_ULTCOM, 
-            T1.ULT_COSTO,
-            
-            -- CAMPOS DE T4 (INVE_CLIB02)
-            T4.CAMPLIB1 AS DIAM_INT, 
-            T4.CAMPLIB2 AS DIAM_EXT, 
-            T4.CAMPLIB3 AS ALTURA,
-            T4.CAMPLIB7 AS SECCION, 
-            T4.CAMPLIB13 AS PERFIL, 
-            T4.CAMPLIB15 AS CLA_SYR, 
-            T4.CAMPLIB16 AS CLA_LC,
-            T4.CAMPLIB17 AS SIST_MED, 
-            T4.CAMPLIB19 AS DESC_ECOMM, 
-            T4.CAMPLIB21 AS GENERO,
-            T4.CAMPLIB22 AS FAMILIA,
-            
-            -- FIX DE PRECIO: COALESCE(MAX()) y TRIM en el JOIN
-            COALESCE(MAX(T5.PRECIO), 0.00) AS PRECIO, 
-            
-            -- PIVOT: Clave alterna del Proveedor '3' (PROV1)
-            MAX(CASE 
-                WHEN TRIM(T2.CVE_CLPV) = '3' 
-                THEN T2.CVE_ALTER 
-                ELSE NULL 
-            END) AS PROV1, 
-            
-            -- PIVOT: Clave alterna del Proveedor '35' (PROV2)
-            MAX(CASE 
-                WHEN TRIM(T2.CVE_CLPV) = '35' 
-                THEN T2.CVE_ALTER 
-                ELSE NULL 
-            END) AS PROV2,
-
-            -- PIVOT: Existencias por Almacén (T6)
-            MAX(CASE WHEN T6.CVE_ALM = '1' THEN T6.EXIST ELSE NULL END) AS ALM_1_EXIST,
-            MAX(CASE WHEN T6.CVE_ALM = '3' THEN T6.EXIST ELSE NULL END) AS ALM_3_EXIST,
-            MAX(CASE WHEN T6.CVE_ALM = '5' THEN T6.EXIST ELSE NULL END) AS ALM_5_EXIST,
-            MAX(CASE WHEN T6.CVE_ALM = '6' THEN T6.EXIST ELSE NULL END) AS ALM_6_EXIST,
-            MAX(CASE WHEN T6.CVE_ALM = '7' THEN T6.EXIST ELSE NULL END) AS ALM_7_EXIST
-            
-        FROM
-            INVE02 T1
-        LEFT JOIN
-            CVES_ALTER02 T2
-            ON T1.CVE_ART = T2.CVE_ART
-        LEFT JOIN
-            PROV02 T3
-            ON T2.CVE_CLPV = T3.CLAVE
-        LEFT JOIN 
-            INVE_CLIB02 T4
-            ON T1.CVE_ART = T4.CVE_PROD
-        -- JOIN A LA TABLA DE PRECIOS FILTRADO POR SUCURSAL (CVE_PRECIO)
-        LEFT JOIN
-            PRECIO_X_PROD02 T5
-            -- FIX: Se agrega TRIM() a T5.CVE_PRECIO para manejar el padding de Firebird
-            ON T1.CVE_ART = T5.CVE_ART AND TRIM(T5.CVE_PRECIO) = ? 
-        -- JOIN A LA TABLA DE EXISTENCIAS
-        LEFT JOIN
-            MULT02 T6
-            ON T1.CVE_ART = T6.CVE_ART
-        --
-        WHERE
-            T2.TIPO = 'P' 
-            AND (
-                T1.CVE_ART LIKE CAST(? AS VARCHAR(255)) OR       
-                T1.DESCR LIKE CAST(? AS VARCHAR(255)) OR         
-                T2.CVE_ALTER LIKE CAST(? AS VARCHAR(255)) OR     
-                T3.NOMBRE LIKE CAST(? AS VARCHAR(255))
-            )
-        
-        GROUP BY
-            T1.CVE_ART, T1.DESCR, T1.UNI_MED, T1.FCH_ULTCOM, T1.ULT_COSTO,
-            T4.CAMPLIB1, T4.CAMPLIB2, T4.CAMPLIB3, T4.CAMPLIB7, T4.CAMPLIB13, T4.CAMPLIB15, 
-            T4.CAMPLIB16, T4.CAMPLIB17, T4.CAMPLIB19, T4.CAMPLIB21, T4.CAMPLIB22
-            
-        ORDER BY
-            T1.CVE_ART;
-    `;
-    // Parámetros: [CVE_PRECIO, LIKE_TERM, LIKE_TERM, LIKE_TERM, LIKE_TERM]
-    const params = [cvePrecio, likeTerm, likeTerm, likeTerm, likeTerm]; 
-
-    try {
-        let resultados = await db.query(sql, params);
-
-        if (resultados.length === 0 && searchTerm.length > 0) {
-            return res.status(404).json({ message: `No se encontraron coincidencias para "${searchTerm}".` });
-        }
-        
-        // Post-procesamiento para transformar las existencias
-        resultados = processExistencias(resultados);
-        
-        res.json(resultados);
-    } catch (error) {
-        console.error('Error al ejecutar la consulta de búsqueda de claves alternas:', error);
-        res.status(500).json({ error: 'Error interno del servidor al obtener las claves alternas.', detalles: error.message });
-    }
-}); */
 
 app.get('/clavesalternas/search', async (req, res) => {
     const { query, SUCURSAL } = req.query;
