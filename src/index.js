@@ -504,7 +504,7 @@ app.get('/clavesalternas', async (req, res) => {
   }
 });
 
-app.get('/clavesalternas/search', async (req, res) => {
+/* app.get('/clavesalternas/search', async (req, res) => {
     const { query, SUCURSAL } = req.query;
     const searchTerm = query ? query.toUpperCase().trim() : '';
     const likeTerm = `%${searchTerm}%`;
@@ -584,7 +584,87 @@ app.get('/clavesalternas/search', async (req, res) => {
         console.error('Error en search:', error);
         res.status(500).json({ error: 'Error interno del servidor.' });
     }
+}); */
+
+app.get('/clavesalternas/search', async (req, res) => {
+    const { query, SUCURSAL } = req.query;
+    const searchTerm = query ? query.toUpperCase().trim() : '';
+    const likeTerm = `%${searchTerm}%`;
+    
+    // CORRECCIÓN 1: Manejar SUCURSAL como String y asegurar el tipo para Firebird
+    const cvePrecio = SUCURSAL ? SUCURSAL.toString() : '1';
+
+    if (!searchTerm) {
+        return res.status(400).json({ error: 'Debes proporcionar un término de búsqueda.' });
+    }
+
+    // CORRECCIÓN 2: Consulta optimizada con LEFT JOINS y CASTs para evitar el error -303
+    const sql = `
+        SELECT 
+            T1.CVE_ART, T1.DESCR, T1.UNI_MED, T1.FCH_ULTCOM, T1.ULT_COSTO, T1.LIN_PROD,
+            T4.CAMPLIB1 AS DIAM_INT, T4.CAMPLIB2 AS DIAM_EXT, T4.CAMPLIB3 AS ALTURA,
+            T4.CAMPLIB7 AS SECCION, T4.CAMPLIB13 AS PERFIL, 
+            T4.CAMPLIB15 AS CLA_SYR, T4.CAMPLIB16 AS CLA_LC,
+            T4.CAMPLIB17 AS SIST_MED, T4.CAMPLIB19 AS DESC_ECOMM, T4.CAMPLIB21 AS GENERO,
+            T4.CAMPLIB22 AS FAMILIA, T4.CAMPLIB28 AS COLOCACION,
+            COALESCE(MAX(T5.PRECIO), 0.00) AS PRECIO, 
+            MAX(CASE WHEN TRIM(T2.CVE_CLPV) = '3' THEN T2.CVE_ALTER ELSE NULL END) AS PROV1, 
+            MAX(CASE WHEN TRIM(T2.CVE_CLPV) = '35' THEN T2.CVE_ALTER ELSE NULL END) AS PROV2,
+            COALESCE(MAX(CASE WHEN T6.CVE_ALM = 1 THEN T6.EXIST ELSE NULL END), 0) AS ALM_1_EXIST,
+            COALESCE(MAX(CASE WHEN T6.CVE_ALM = 3 THEN T6.EXIST ELSE NULL END), 0) AS ALM_3_EXIST,
+            COALESCE(MAX(CASE WHEN T6.CVE_ALM = 5 THEN T6.EXIST ELSE NULL END), 0) AS ALM_5_EXIST,
+            COALESCE(MAX(CASE WHEN T6.CVE_ALM = 6 THEN T6.EXIST ELSE NULL END), 0) AS ALM_6_EXIST,
+            COALESCE(MAX(CASE WHEN T6.CVE_ALM = 7 THEN T6.EXIST ELSE NULL END), 0) AS ALM_7_EXIST
+        FROM INVE02 T1
+        LEFT JOIN CVES_ALTER02 T2 ON T1.CVE_ART = T2.CVE_ART
+        LEFT JOIN INVE_CLIB02 T4 ON T1.CVE_ART = T4.CVE_PROD
+        -- Colocamos el filtro de precio en el ON y usamos CAST para evitar truncation
+        LEFT JOIN PRECIO_X_PROD02 T5 ON (T1.CVE_ART = T5.CVE_ART AND TRIM(T5.CVE_PRECIO) = CAST(? AS VARCHAR(10)))
+        LEFT JOIN MULT02 T6 ON T1.CVE_ART = T6.CVE_ART
+        WHERE 
+            UPPER(T1.CVE_ART) LIKE CAST(? AS VARCHAR(100)) OR 
+            UPPER(T1.DESCR) LIKE CAST(? AS VARCHAR(100)) OR 
+            UPPER(COALESCE(T2.CVE_ALTER, '')) LIKE CAST(? AS VARCHAR(100)) OR
+            UPPER(COALESCE(T4.CAMPLIB19, '')) LIKE CAST(? AS VARCHAR(100))
+        GROUP BY 1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18
+        ORDER BY T1.CVE_ART;
+    `;
+
+    try {
+        // Ejecutar consulta con los parámetros limpios
+        let dataResult = await db.query(sql, [cvePrecio, likeTerm, likeTerm, likeTerm, likeTerm]);
+
+        if (dataResult.length > 0) {
+            const articulosIds = dataResult.map(item => item.CVE_ART.trim());
+            const sqlEmp3 = `
+                SELECT TRIM(CVE_ART) AS ART, EXIST 
+                FROM MULT03 
+                WHERE CVE_ALM = 3 AND CVE_ART IN (${articulosIds.map(() => '?').join(',')})
+            `;
+
+            try {
+                const resEmp3 = await db3.query(sqlEmp3, articulosIds);
+                const existenciaEmp3Map = {};
+                resEmp3.forEach(row => { existenciaEmp3Map[row.ART] = row.EXIST; });
+
+                dataResult = dataResult.map(item => ({
+                    ...item,
+                    ALM_10_EXIST: existenciaEmp3Map[item.CVE_ART.trim()] || 0
+                }));
+            } catch (err3) {
+                dataResult = dataResult.map(item => ({ ...item, ALM_10_EXIST: 0 }));
+            }
+        }
+
+        dataResult = processExistencias(dataResult);
+        res.json(dataResult);
+
+    } catch (error) {
+        console.error('Error en search corregido:', error);
+        res.status(500).json({ error: 'Error interno del servidor.', detalles: error.message });
+    }
 });
+
 
 /* app.get('/clavesalternas/filter-ranges', async (req, res) => {
     const limit = parseInt(req.query.limit) || 100;
