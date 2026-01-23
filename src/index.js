@@ -332,32 +332,6 @@ app.get('/precios', async (req, res) => {
   }
 });
 
-/* app.get('/familias', async (req, res) => {
-  const sql = `
-    SELECT DISTINCT
-      CAMPLIB22 AS FAMILIA
-    FROM
-      INVE_CLIB02
-    WHERE
-      CAMPLIB22 IS NOT NULL AND CAMPLIB22 <> ''
-    ORDER BY
-      FAMILIA;
-  `;
-
-  try {
-    const familias = await db.query(sql);
-    
-    // Devolvemos la lista de familias únicas
-    res.json(familias);
-  } catch (error) {
-    console.error('Error al ejecutar la consulta de familias únicas:', error);
-    res.status(500).json({ 
-        error: 'Error interno del servidor al obtener las familias.', 
-        detalles: error.message 
-    });
-  }
-}); */
-
 app.get('/familias', async (req, res) => {
   // Lista de familias a excluir
   const excluir = [
@@ -504,88 +478,6 @@ app.get('/clavesalternas', async (req, res) => {
   }
 });
 
-/* app.get('/clavesalternas/search', async (req, res) => {
-    const { query, SUCURSAL } = req.query;
-    const searchTerm = query ? query.toUpperCase().trim() : '';
-    const likeTerm = `%${searchTerm}%`;
-    const cvePrecio = SUCURSAL ? parseInt(SUCURSAL) : 1;
-
-    if (!searchTerm) {
-        return res.status(400).json({ error: 'Debes proporcionar un término de búsqueda.' });
-    }
-
-    const sql = `
-        SELECT 
-            T1.CVE_ART, T1.DESCR, T1.UNI_MED, T1.FCH_ULTCOM, T1.ULT_COSTO, T1.LIN_PROD,
-            T4.CAMPLIB1 AS DIAM_INT, T4.CAMPLIB2 AS DIAM_EXT, T4.CAMPLIB3 AS ALTURA,
-            T4.CAMPLIB7 AS SECCION, T4.CAMPLIB13 AS PERFIL, 
-            T4.CAMPLIB15 AS CLA_SYR, T4.CAMPLIB16 AS CLA_LC,
-            T4.CAMPLIB17 AS SIST_MED, T4.CAMPLIB19 AS DESC_ECOMM, T4.CAMPLIB21 AS GENERO,
-            T4.CAMPLIB22 AS FAMILIA, T4.CAMPLIB28 AS COLOCACION,
-            COALESCE(MAX(T5.PRECIO), 0.00) AS PRECIO, 
-            MAX(CASE WHEN TRIM(T2.CVE_CLPV) = '3' THEN T2.CVE_ALTER ELSE NULL END) AS PROV1, 
-            MAX(CASE WHEN TRIM(T2.CVE_CLPV) = '35' THEN T2.CVE_ALTER ELSE NULL END) AS PROV2,
-            MAX(CASE WHEN T6.CVE_ALM = '1' THEN T6.EXIST ELSE NULL END) AS ALM_1_EXIST,
-            MAX(CASE WHEN T6.CVE_ALM = '3' THEN T6.EXIST ELSE NULL END) AS ALM_3_EXIST,
-            MAX(CASE WHEN T6.CVE_ALM = '5' THEN T6.EXIST ELSE NULL END) AS ALM_5_EXIST,
-            MAX(CASE WHEN T6.CVE_ALM = '6' THEN T6.EXIST ELSE NULL END) AS ALM_6_EXIST,
-            MAX(CASE WHEN T6.CVE_ALM = '7' THEN T6.EXIST ELSE NULL END) AS ALM_7_EXIST
-        FROM INVE02 T1
-        LEFT JOIN CVES_ALTER02 T2 ON T1.CVE_ART = T2.CVE_ART
-        LEFT JOIN INVE_CLIB02 T4 ON T1.CVE_ART = T4.CVE_PROD
-        LEFT JOIN PRECIO_X_PROD02 T5 ON T1.CVE_ART = T5.CVE_ART AND TRIM(T5.CVE_PRECIO) = ? 
-        LEFT JOIN MULT02 T6 ON T1.CVE_ART = T6.CVE_ART
-        WHERE 
-            UPPER(T1.CVE_ART) LIKE ? OR 
-            UPPER(T1.DESCR) LIKE ? OR 
-            UPPER(T2.CVE_ALTER) LIKE ? OR
-            UPPER(T4.CAMPLIB19) LIKE ?
-        GROUP BY 1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18
-        ORDER BY T1.CVE_ART;
-    `;
-
-    try {
-        // A. Obtener resultados de DB Principal
-        let dataResult = await db.query(sql, [cvePrecio, likeTerm, likeTerm, likeTerm, likeTerm]);
-
-        // B. Si hay resultados, enriquecer con la Empresa 3 (Fresnillo2)
-        if (dataResult.length > 0) {
-            const articulosIds = dataResult.map(item => item.CVE_ART.trim());
-            
-            const sqlEmp3 = `
-                SELECT TRIM(CVE_ART) AS ART, EXIST 
-                FROM MULT03 
-                WHERE CVE_ALM = 3 AND CVE_ART IN (${articulosIds.map(() => '?').join(',')})
-            `;
-
-            try {
-                const resEmp3 = await db3.query(sqlEmp3, articulosIds);
-                const existenciaEmp3Map = {};
-                resEmp3.forEach(row => {
-                    existenciaEmp3Map[row.ART] = row.EXIST;
-                });
-
-                // Inyectar existencia de Fresnillo2
-                dataResult = dataResult.map(item => ({
-                    ...item,
-                    ALM_10_EXIST: existenciaEmp3Map[item.CVE_ART.trim()] || 0
-                }));
-            } catch (err3) {
-                console.error("Error en búsqueda DB3:", err3);
-                dataResult = dataResult.map(item => ({ ...item, ALM_10_EXIST: 0 }));
-            }
-        }
-
-        // C. Procesar y enviar
-        dataResult = processExistencias(dataResult);
-        res.json(dataResult);
-
-    } catch (error) {
-        console.error('Error en search:', error);
-        res.status(500).json({ error: 'Error interno del servidor.' });
-    }
-}); */
-
 app.get('/clavesalternas/search', async (req, res) => {
     const { query, SUCURSAL } = req.query;
     const searchTerm = query ? query.toUpperCase().trim() : '';
@@ -720,531 +612,47 @@ app.get('/clavesalternas/search2', async (req, res) => {
     }
 });
 
-/* app.get('/clavesalternas/filter-ranges', async (req, res) => {
-    const limit = parseInt(req.query.limit) || 100;
-    const offset = parseInt(req.query.offset) || 0;
-    const { SUCURSAL } = req.query; 
-    const cvePrecio = SUCURSAL ? parseInt(SUCURSAL) : 1; 
-
-    // Definimos las dimensiones que SIEMPRE vienen en par min/max
-    const dimensionalFields = {
-        DIAM_INT: 'T4.CAMPLIB1',
-        DIAM_EXT: 'T4.CAMPLIB2',
-        ALTURA: 'T4.CAMPLIB3',
-        SECCION: 'T4.CAMPLIB7'
-    };
-
-    // Otros filtros que siguen siendo de texto o búsqueda parcial
-    const extraFilters = {
-        FAMILIA: 'T4.CAMPLIB22',
-        COLOCACION: 'T4.CAMPLIB28',
-        LINEA: 'T1.LIN_PROD',
-        PERFIL: 'T4.CAMPLIB13',
-        SIST_MED: 'T4.CAMPLIB17'
-    };
-    
-    let whereClauses = ["T2.TIPO = 'P'"];
-    let params = [];
-
-    // 1. Lógica de Rangos con BETWEEN para dimensiones
-    for (const alias in dimensionalFields) {
-        const column = dimensionalFields[alias];
-        const lowerAlias = alias.toLowerCase();
-        
-        const valMin = req.query[`${lowerAlias}_min`];
-        const valMax = req.query[`${lowerAlias}_max`];
-
-        if (valMin !== undefined && valMax !== undefined) {
-            // Convertimos el campo de la DB (texto con comas) a numérico para comparar
-            const dbNum = `CAST(REPLACE(COALESCE(NULLIF(TRIM(${column}), ''), '0'), ',', '.') AS NUMERIC(15, 5))`;
-            
-            whereClauses.push(`${dbNum} BETWEEN CAST(? AS NUMERIC(15, 5)) AND CAST(? AS NUMERIC(15, 5))`);
-            params.push(parseFloat(valMin.replace(',', '.')));
-            params.push(parseFloat(valMax.replace(',', '.')));
-        }
-    }
-
-    // 2. Lógica para filtros extra (Texto)
-    for (const alias in extraFilters) {
-        const column = extraFilters[alias];
-        const val = req.query[alias.toLowerCase()];
-        if (val) {
-            whereClauses.push(`UPPER(TRIM(${column})) LIKE ?`);
-            params.push(`%${val.toUpperCase().trim()}%`);
-        }
-    }
-
-    const whereString = `WHERE ${whereClauses.join(' AND ')}`;
-
-    // Consulta de Datos (Incluyendo LIN_PROD, COLOCACION y Almacenes de Empresa 2)
-    const dataSql = `
-        SELECT FIRST ${limit} SKIP ${offset}
-            T1.CVE_ART, T1.DESCR, T1.UNI_MED, T1.FCH_ULTCOM, T1.ULT_COSTO, T1.LIN_PROD,
-            T4.CAMPLIB1 AS DIAM_INT, T4.CAMPLIB2 AS DIAM_EXT, T4.CAMPLIB3 AS ALTURA,
-            T4.CAMPLIB7 AS SECCION, T4.CAMPLIB13 AS PERFIL, 
-            T4.CAMPLIB15 AS CLA_SYR, T4.CAMPLIB16 AS CLA_LC,
-            T4.CAMPLIB17 AS SIST_MED, T4.CAMPLIB19 AS DESC_ECOMM, T4.CAMPLIB21 AS GENERO,
-            T4.CAMPLIB22 AS FAMILIA, T4.CAMPLIB28 AS COLOCACION,
-            COALESCE(MAX(T5.PRECIO), 0.00) AS PRECIO, 
-            MAX(CASE WHEN TRIM(T2.CVE_CLPV) = '3' THEN T2.CVE_ALTER ELSE NULL END) AS PROV1, 
-            MAX(CASE WHEN TRIM(T2.CVE_CLPV) = '35' THEN T2.CVE_ALTER ELSE NULL END) AS PROV2,
-            MAX(CASE WHEN T6.CVE_ALM = '1' THEN T6.EXIST ELSE NULL END) AS ALM_1_EXIST,
-            MAX(CASE WHEN T6.CVE_ALM = '3' THEN T6.EXIST ELSE NULL END) AS ALM_3_EXIST,
-            MAX(CASE WHEN T6.CVE_ALM = '5' THEN T6.EXIST ELSE NULL END) AS ALM_5_EXIST,
-            MAX(CASE WHEN T6.CVE_ALM = '6' THEN T6.EXIST ELSE NULL END) AS ALM_6_EXIST,
-            MAX(CASE WHEN T6.CVE_ALM = '7' THEN T6.EXIST ELSE NULL END) AS ALM_7_EXIST
-        FROM INVE02 T1
-        LEFT JOIN CVES_ALTER02 T2 ON T1.CVE_ART = T2.CVE_ART
-        LEFT JOIN INVE_CLIB02 T4 ON T1.CVE_ART = T4.CVE_PROD
-        LEFT JOIN PRECIO_X_PROD02 T5 ON T1.CVE_ART = T5.CVE_ART AND TRIM(T5.CVE_PRECIO) = ? 
-        LEFT JOIN MULT02 T6 ON T1.CVE_ART = T6.CVE_ART
-        ${whereString}
-        GROUP BY 1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18
-        ORDER BY T1.CVE_ART;
-    `;
-
-    // Consulta de Conteo para paginación
-    const countSql = `
-        SELECT COUNT(DISTINCT T1.CVE_ART) AS TOTAL_REGISTROS
-        FROM INVE02 T1
-        LEFT JOIN CVES_ALTER02 T2 ON T1.CVE_ART = T2.CVE_ART
-        LEFT JOIN INVE_CLIB02 T4 ON T1.CVE_ART = T4.CVE_PROD
-        ${whereString};
-    `;
-
-    try {
-        const countRes = await db.query(countSql, params);
-        const totalRegistros = countRes[0].TOTAL_REGISTROS || 0;
-
-        let dataResult = await db.query(dataSql, [cvePrecio, ...params]); 
-
-        // 3. Enriquecimiento con Empresa 3 (Fresnillo2 - Almacén 3)
-        if (dataResult.length > 0) {
-            const ids = dataResult.map(item => item.CVE_ART.trim());
-            const sql3 = `SELECT TRIM(CVE_ART) AS ART, EXIST FROM MULT03 WHERE CVE_ALM = 3 AND CVE_ART IN (${ids.map(() => '?').join(',')})`;
-            
-            try {
-                const res3 = await db3.query(sql3, ids);
-                const map3 = {};
-                res3.forEach(r => map3[r.ART] = r.EXIST);
-                dataResult = dataResult.map(item => ({ ...item, ALM_10_EXIST: map3[item.CVE_ART.trim()] || 0 }));
-            } catch (err3) {
-                dataResult = dataResult.map(item => ({ ...item, ALM_10_EXIST: 0 }));
-            }
-        }
-
-        dataResult = processExistencias(dataResult);
-
-        res.json({
-            data: dataResult,
-            pagination: {
-                totalRecords: totalRegistros,
-                totalPages: Math.ceil(totalRegistros / limit),
-                currentPage: Math.floor(offset / limit) + 1,
-                limit
-            }
-        });
-    } catch (error) {
-        res.status(500).json({ error: error.message });
-    }
-}); */
-
-
 app.get('/clavesalternas/filter-ranges', async (req, res) => {
-    const limit = parseInt(req.query.limit) || 100;
-    const offset = parseInt(req.query.offset) || 0;
-    const { SUCURSAL } = req.query; 
-    const cvePrecio = SUCURSAL ? parseInt(SUCURSAL) : 1; 
+    const { SUCURSAL, familia, diam_int_min, diam_int_max, diam_ext_min, diam_ext_max, altura_min, altura_max, limit, offset } = req.query;
+    const cvePrecio = SUCURSAL ? SUCURSAL.toString() : '1';
+    const numLimit = parseInt(limit) || 100;
+    const numOffset = parseInt(offset) || 0;
 
-    const dimensionalFields = {
-        DIAM_INT: 'T4.CAMPLIB1',
-        DIAM_EXT: 'T4.CAMPLIB2',
-        ALTURA: 'T4.CAMPLIB3',
-        SECCION: 'T4.CAMPLIB7'
-    };
+    let whereClauses = ["1=1"];
+    let params = [cvePrecio];
 
-    const extraFilters = {
-        FAMILIA: 'T4.CAMPLIB22',
-        COLOCACION: 'T4.CAMPLIB28',
-        LINEA: 'T1.LIN_PROD',
-        PERFIL: 'T4.CAMPLIB13',
-        SIST_MED: 'T4.CAMPLIB17'
-    };
-    
-    let whereClauses = ["T2.TIPO = 'P'"];
-    let params = [];
+    // Mapeo de rangos con la lógica de CAST robusta
+    const rangeFilters = [
+        { min: diam_int_min, max: diam_int_max, col: 'T4.CAMPLIB1' },
+        { min: diam_ext_min, max: diam_ext_max, col: 'T4.CAMPLIB2' },
+        { min: altura_min, max: altura_max, col: 'T4.CAMPLIB3' }
+    ];
 
-    // 1. Lógica de Rangos - Ajustada para ser más permisiva con valores vacíos en la DB
-    for (const alias in dimensionalFields) {
-        const column = dimensionalFields[alias];
-        const lowerAlias = alias.toLowerCase();
-        
-        const valMin = req.query[`${lowerAlias}_min`];
-        const valMax = req.query[`${lowerAlias}_max`];
-
-        if (valMin !== undefined && valMax !== undefined) {
-            // Usamos COALESCE '0' para que si el campo está vacío en la DB no rompa la comparación numérica
-            const dbNum = `CAST(REPLACE(COALESCE(NULLIF(TRIM(${column}), ''), '0'), ',', '.') AS NUMERIC(15, 5))`;
+    rangeFilters.forEach(filter => {
+        if (filter.min || filter.max) {
+            // Usamos la misma fórmula de conversión segura que en filter2
+            const dbNum = `CAST(REPLACE(COALESCE(NULLIF(TRIM(${filter.col}), ''), '0'), ',', '.') AS NUMERIC(15, 4))`;
             
-            whereClauses.push(`${dbNum} BETWEEN CAST(? AS NUMERIC(15, 5)) AND CAST(? AS NUMERIC(15, 5))`);
-            params.push(parseFloat(valMin.replace(',', '.')));
-            params.push(parseFloat(valMax.replace(',', '.')));
+            if (filter.min) {
+                whereClauses.push(`${dbNum} >= CAST(? AS NUMERIC(15, 4))`);
+                params.push(parseFloat(filter.min.replace(',', '.')));
+            }
+            if (filter.max) {
+                whereClauses.push(`${dbNum} <= CAST(? AS NUMERIC(15, 4))`);
+                params.push(parseFloat(filter.max.replace(',', '.')));
+            }
         }
-    }
+    });
 
-    for (const alias in extraFilters) {
-        const column = extraFilters[alias];
-        const val = req.query[alias.toLowerCase()];
-        if (val) {
-            whereClauses.push(`UPPER(TRIM(COALESCE(${column}, ''))) LIKE ?`);
-            params.push(`%${val.toUpperCase().trim()}%`);
-        }
+    if (familia) {
+        whereClauses.push(`UPPER(TRIM(COALESCE(T4.CAMPLIB22, ''))) = UPPER(TRIM(?))`);
+        params.push(familia);
     }
 
     const whereString = `WHERE ${whereClauses.join(' AND ')}`;
 
-    // Consulta de Datos corregida
-    // Agregamos COALESCE a FCH_ULTCOM y aseguramos que el GROUP BY sea sólido
-    const dataSql = `
-        SELECT FIRST ${limit} SKIP ${offset}
-            T1.CVE_ART, 
-            T1.DESCR, 
-            T1.UNI_MED, 
-            T1.FCH_ULTCOM, -- No se puede usar COALESCE aquí si quieres el objeto Date original, pero Firebird lo maneja bien
-            T1.ULT_COSTO, 
-            T1.LIN_PROD,
-            T4.CAMPLIB1 AS DIAM_INT, 
-            T4.CAMPLIB2 AS DIAM_EXT, 
-            T4.CAMPLIB3 AS ALTURA,
-            T4.CAMPLIB7 AS SECCION, 
-            T4.CAMPLIB13 AS PERFIL, 
-            T4.CAMPLIB15 AS CLA_SYR, 
-            T4.CAMPLIB16 AS CLA_LC,
-            T4.CAMPLIB17 AS SIST_MED, 
-            T4.CAMPLIB19 AS DESC_ECOMM, 
-            T4.CAMPLIB21 AS GENERO,
-            T4.CAMPLIB22 AS FAMILIA, 
-            T4.CAMPLIB28 AS COLOCACION,
-            COALESCE(MAX(T5.PRECIO), 0.00) AS PRECIO, 
-            MAX(CASE WHEN TRIM(T2.CVE_CLPV) = '3' THEN T2.CVE_ALTER ELSE NULL END) AS PROV1, 
-            MAX(CASE WHEN TRIM(T2.CVE_CLPV) = '35' THEN T2.CVE_ALTER ELSE NULL END) AS PROV2,
-            MAX(CASE WHEN T6.CVE_ALM = '1' THEN T6.EXIST ELSE NULL END) AS ALM_1_EXIST,
-            MAX(CASE WHEN T6.CVE_ALM = '3' THEN T6.EXIST ELSE NULL END) AS ALM_3_EXIST,
-            MAX(CASE WHEN T6.CVE_ALM = '5' THEN T6.EXIST ELSE NULL END) AS ALM_5_EXIST,
-            MAX(CASE WHEN T6.CVE_ALM = '6' THEN T6.EXIST ELSE NULL END) AS ALM_6_EXIST,
-            MAX(CASE WHEN T6.CVE_ALM = '7' THEN T6.EXIST ELSE NULL END) AS ALM_7_EXIST
-        FROM INVE02 T1
-        INNER JOIN CVES_ALTER02 T2 ON T1.CVE_ART = T2.CVE_ART
-        LEFT JOIN INVE_CLIB02 T4 ON T1.CVE_ART = T4.CVE_PROD
-        LEFT JOIN PRECIO_X_PROD02 T5 ON T1.CVE_ART = T5.CVE_ART AND TRIM(T5.CVE_PRECIO) = CAST(? AS VARCHAR(10))
-        LEFT JOIN MULT02 T6 ON T1.CVE_ART = T6.CVE_ART
-        ${whereString}
-        GROUP BY 1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18
-        ORDER BY T1.CVE_ART;
-    `;
-
-    const countSql = `
-        SELECT COUNT(DISTINCT T1.CVE_ART) AS TOTAL_REGISTROS
-        FROM INVE02 T1
-        INNER JOIN CVES_ALTER02 T2 ON T1.CVE_ART = T2.CVE_ART
-        LEFT JOIN INVE_CLIB02 T4 ON T1.CVE_ART = T4.CVE_PROD
-        ${whereString};
-    `;
-
-    try {
-        const countRes = await db.query(countSql, params);
-        const totalRegistros = countRes[0].TOTAL_REGISTROS || 0;
-
-        let dataResult = await db.query(dataSql, [cvePrecio, ...params]); 
-
-        if (dataResult.length > 0) {
-            const ids = dataResult.map(item => item.CVE_ART.trim());
-            const sql3 = `SELECT TRIM(CVE_ART) AS ART, EXIST FROM MULT03 WHERE CVE_ALM = 3 AND CVE_ART IN (${ids.map(() => '?').join(',')})`;
-            
-            try {
-                const res3 = await db3.query(sql3, ids);
-                const map3 = {};
-                res3.forEach(r => map3[r.ART] = r.EXIST);
-                dataResult = dataResult.map(item => ({ ...item, ALM_10_EXIST: map3[item.CVE_ART.trim()] || 0 }));
-            } catch (err3) {
-                dataResult = dataResult.map(item => ({ ...item, ALM_10_EXIST: 0 }));
-            }
-        }
-
-        dataResult = processExistencias(dataResult);
-
-        res.json({
-            data: dataResult,
-            pagination: {
-                totalRecords: totalRegistros,
-                totalPages: Math.ceil(totalRegistros / limit),
-                currentPage: Math.floor(offset / limit) + 1,
-                limit
-            }
-        });
-    } catch (error) {
-        console.error("Error en filter-ranges:", error);
-        res.status(500).json({ error: error.message });
-    }
-});
-
-
-// Endpoint para búsqueda y filtrado avanzado con paginación
-// Recibe: ?familia=X&diam_int=Y&limit=10&offset=0&SUCURSAL=3
-/* app.get('/clavesalternas/filter', async (req, res) => {
-    
-    // 1. Configuración de Paginación y SUCURSAL
-    const limit = parseInt(req.query.limit) || 100;
-    const offset = parseInt(req.query.offset) || 0;
-    const { SUCURSAL } = req.query; 
-    const cvePrecio = SUCURSAL ? parseInt(SUCURSAL) : 1; 
-    
-    // Tolerancia (Epsilon) para comparar campos numéricos (NUMERIC(15, 5))
-    const NUMERIC_TOLERANCE = 0.00001; 
-
-    // 2. Definición de Parámetros de Filtrado
-    const filterMap = {
-        FAMILIA: 'T4.CAMPLIB22',
-        DIAM_INT: 'T4.CAMPLIB1',
-        DIAM_EXT: 'T4.CAMPLIB2',
-        ALTURA: 'T4.CAMPLIB3',
-        SECCION: 'T4.CAMPLIB7',
-        PERFIL: 'T4.CAMPLIB13', 
-        SIST_MED: 'T4.CAMPLIB17',
-    };
-
-    // Campos que deben ser tratados como NÚMEROS (para CAST a NUMERIC)
-    const numericDimensionalFields = ['T4.CAMPLIB1', 'T4.CAMPLIB2', 'T4.CAMPLIB3', 'T4.CAMPLIB7'];
-    
-    let whereClauses = [];
-    let params = [];
-    
-    whereClauses.push("T2.TIPO = 'P'");
-
-    // 3. Construcción Dinámica de la Cláusula WHERE
-    for (const alias in filterMap) {
-        // FIX: Se define 'column' al inicio del loop para evitar el ReferenceError
-        const column = filterMap[alias]; 
-        let queryValue = req.query[alias.toLowerCase()]; 
-
-        if (queryValue) {
-            queryValue = queryValue.replace(/\+/g, ' ').trim(); 
-            
-            if (queryValue === '') continue; 
-
-            // La variable 'column' ya está definida arriba
-            
-            // --- Lógica para Campos NUMÉRICOS (Comparación con Tolerancia) ---
-            if (numericDimensionalFields.includes(column)) {
-                
-                const cleanNumericValue = parseFloat(queryValue.replace(',', '.'));
-                
-                if (isNaN(cleanNumericValue)) continue; 
-
-                const dbColumnExpression = `CAST(REPLACE(COALESCE(NULLIF(TRIM(${column}), ''), '0'), ',', '.') AS NUMERIC(15, 5))`;
-                
-                // Comparación por tolerancia para campos decimales
-                whereClauses.push(`ABS(${dbColumnExpression} - CAST(? AS NUMERIC(15, 5))) <= ${NUMERIC_TOLERANCE}`);
-                params.push(cleanNumericValue); 
-
-            } else {
-                // --- Lógica para Campos de TEXTO (incluye PERFIL) ---
-                
-                const upperQueryValue = queryValue.toUpperCase();
-                const likeTerm = `%${upperQueryValue}%`;
-
-                const dbColumnExpression = `UPPER(TRIM(${column}))`;
-
-                whereClauses.push(`${dbColumnExpression} LIKE CAST(? AS VARCHAR(255))`);
-                params.push(likeTerm);
-            }
-        }
-    }
-
-    const whereString = whereClauses.length > 0 ? `WHERE ${whereClauses.join(' AND ')}` : '';
-
-    // 4. Consulta de CONTEO (Utiliza solo los parámetros de filtro)
-    const countSql = `
-        SELECT
-            COUNT(DISTINCT T1.CVE_ART) AS TOTAL_REGISTROS
-        FROM
-            INVE02 T1
-        LEFT JOIN CVES_ALTER02 T2 ON T1.CVE_ART = T2.CVE_ART
-        LEFT JOIN PROV02 T3 ON T2.CVE_CLPV = T3.CLAVE
-        LEFT JOIN INVE_CLIB02 T4 ON T1.CVE_ART = T4.CVE_PROD
-        ${whereString};
-    `;
-    
-    // 5. Consulta de DATOS (Paginada y Consolidada)
-    const dataSql = `
-        SELECT FIRST ${limit} SKIP ${offset}
-            T1.CVE_ART, T1.DESCR, T1.UNI_MED, T1.FCH_ULTCOM, T1.ULT_COSTO,
-            T4.CAMPLIB1 AS DIAM_INT, T4.CAMPLIB2 AS DIAM_EXT, T4.CAMPLIB3 AS ALTURA,
-            T4.CAMPLIB7 AS SECCION, 
-            T4.CAMPLIB13 AS PERFIL, 
-            T4.CAMPLIB15 AS CLA_SYR, T4.CAMPLIB16 AS CLA_LC,
-            T4.CAMPLIB17 AS SIST_MED, T4.CAMPLIB19 AS DESC_ECOMM, T4.CAMPLIB21 AS GENERO,
-            T4.CAMPLIB22 AS FAMILIA,
-            
-            -- FIX DE PRECIO: COALESCE(MAX()) y TRIM en el JOIN
-            COALESCE(MAX(T5.PRECIO), 0.00) AS PRECIO, 
-            
-            -- PIVOT: Clave alterna del Proveedor '3' (PROV1)
-            MAX(CASE 
-                WHEN TRIM(T2.CVE_CLPV) = '3' 
-                THEN T2.CVE_ALTER 
-                ELSE NULL 
-            END) AS PROV1, 
-            
-            -- PIVOT: Clave alterna del Proveedor '35' (PROV2)
-            MAX(CASE 
-                WHEN TRIM(T2.CVE_CLPV) = '35' 
-                THEN T2.CVE_ALTER 
-                ELSE NULL 
-            END) AS PROV2,
-            
-            -- PIVOT: Existencias por Almacén (T6)
-            MAX(CASE WHEN T6.CVE_ALM = '1' THEN T6.EXIST ELSE NULL END) AS ALM_1_EXIST,
-            MAX(CASE WHEN T6.CVE_ALM = '3' THEN T6.EXIST ELSE NULL END) AS ALM_3_EXIST,
-            MAX(CASE WHEN T6.CVE_ALM = '5' THEN T6.EXIST ELSE NULL END) AS ALM_5_EXIST,
-            MAX(CASE WHEN T6.CVE_ALM = '6' THEN T6.EXIST ELSE NULL END) AS ALM_6_EXIST,
-            MAX(CASE WHEN T6.CVE_ALM = '7' THEN T6.EXIST ELSE NULL END) AS ALM_7_EXIST
-            
-        FROM
-            INVE02 T1
-        LEFT JOIN CVES_ALTER02 T2 ON T1.CVE_ART = T2.CVE_ART
-        LEFT JOIN PROV02 T3 ON T2.CVE_CLPV = T3.CLAVE
-        LEFT JOIN INVE_CLIB02 T4 ON T1.CVE_ART = T4.CVE_PROD
-        LEFT JOIN PRECIO_X_PROD02 T5
-            -- FIX: Se agrega TRIM() a T5.CVE_PRECIO para manejar el padding de Firebird
-            ON T1.CVE_ART = T5.CVE_ART AND TRIM(T5.CVE_PRECIO) = ? 
-        LEFT JOIN MULT02 T6
-            ON T1.CVE_ART = T6.CVE_ART
-        --
-        ${whereString}
-        
-        -- Agrupamos por todos los campos de T1 y T4 (sin T5.PRECIO, que es agregado)
-        GROUP BY
-            T1.CVE_ART, T1.DESCR, T1.UNI_MED, T1.FCH_ULTCOM, T1.ULT_COSTO,
-            T4.CAMPLIB1, T4.CAMPLIB2, T4.CAMPLIB3, T4.CAMPLIB7, T4.CAMPLIB13, T4.CAMPLIB15, 
-            T4.CAMPLIB16, T4.CAMPLIB17, T4.CAMPLIB19, T4.CAMPLIB21, T4.CAMPLIB22
-            
-        ORDER BY
-            T1.CVE_ART;
-    `;
-
-    try {
-        // Ejecutar CONTEO
-        const countResult = await db.query(countSql, params);
-        const totalRegistros = countResult[0].TOTAL_REGISTROS || 0;
-
-        // Manejo de 404
-        if (totalRegistros === 0 && Object.keys(req.query).some(key => key !== 'limit' && key !== 'offset')) {
-            return res.status(404).json({ message: 'No se encontraron resultados que coincidan con los criterios de filtro.' });
-        }
-
-        // Ejecutar DATOS: cvePrecio DEBE ir al inicio del array de parámetros
-        let dataResult = await db.query(dataSql, [cvePrecio, ...params]); 
-        
-        // Post-procesamiento para transformar las existencias
-        dataResult = processExistencias(dataResult);
-
-        // 6. Cálculos y Estructura de Paginación
-        const totalPages = Math.ceil(totalRegistros / limit);
-        const currentPage = Math.floor(offset / limit) + 1;
-        
-        // Devolver la Respuesta con la estructura solicitada
-        res.json({
-            data: dataResult,
-            pagination: {
-                currentPage: currentPage,
-                totalPages: totalPages,
-                totalRecords: totalRegistros,
-                limit: limit
-            },
-        });
-        
-    } catch (error) {
-        console.error('Error al ejecutar la consulta de filtrado de claves alternas:', error);
-        res.status(500).json({ 
-            error: 'Error interno del servidor al obtener las claves alternas por filtro.', 
-            detalles: error.message 
-        });
-    }
-}); */
-
-/* app.get('/clavesalternas/filter', async (req, res) => {
-    
-    // 1. Configuración inicial
-    const limit = parseInt(req.query.limit) || 100;
-    const offset = parseInt(req.query.offset) || 0;
-    const { SUCURSAL } = req.query; 
-    const cvePrecio = SUCURSAL ? parseInt(SUCURSAL) : 1; 
-    const NUMERIC_TOLERANCE = 0.00001; 
-
-    // 2. Mapeo de filtros (Aquí agregamos COLOCACION y LINEA)
-    const filterMap = {
-        FAMILIA: 'T4.CAMPLIB22',
-        DIAM_INT: 'T4.CAMPLIB1',
-        DIAM_EXT: 'T4.CAMPLIB2',
-        ALTURA: 'T4.CAMPLIB3',
-        SECCION: 'T4.CAMPLIB7',
-        PERFIL: 'T4.CAMPLIB13', 
-        SIST_MED: 'T4.CAMPLIB17',
-        COLOCACION: 'T4.CAMPLIB28', // <-- Nuevo filtro
-        LINEA: 'T1.LIN_PROD'        // <-- Nuevo filtro
-    };
-
-    // Campos que requieren tratamiento numérico especial
-    const numericDimensionalFields = ['T4.CAMPLIB1', 'T4.CAMPLIB2', 'T4.CAMPLIB3', 'T4.CAMPLIB7'];
-    
-    let whereClauses = [];
-    let params = [];
-    
-    // Filtro base: solo productos principales
-    whereClauses.push("T2.TIPO = 'P'");
-
-    // Construcción dinámica de la cláusula WHERE
-    for (const alias in filterMap) {
-        const column = filterMap[alias]; 
-        let queryValue = req.query[alias.toLowerCase()]; 
-
-        if (queryValue) {
-            queryValue = queryValue.replace(/\+/g, ' ').trim(); 
-            if (queryValue === '') continue; 
-
-            if (numericDimensionalFields.includes(column)) {
-                // Lógica para números (tolerancia decimal)
-                const cleanNumericValue = parseFloat(queryValue.replace(',', '.'));
-                if (isNaN(cleanNumericValue)) continue; 
-                const dbColumnExpression = `CAST(REPLACE(COALESCE(NULLIF(TRIM(${column}), ''), '0'), ',', '.') AS NUMERIC(15, 5))`;
-                whereClauses.push(`ABS(${dbColumnExpression} - CAST(? AS NUMERIC(15, 5))) <= ${NUMERIC_TOLERANCE}`);
-                params.push(cleanNumericValue); 
-            } else {
-                // Lógica para texto (LIKE) - Aplica a FAMILIA, COLOCACION, LINEA, etc.
-                const upperQueryValue = queryValue.toUpperCase();
-                const likeTerm = `%${upperQueryValue}%`;
-                const dbColumnExpression = `UPPER(TRIM(${column}))`;
-                whereClauses.push(`${dbColumnExpression} LIKE CAST(? AS VARCHAR(255))`);
-                params.push(likeTerm);
-            }
-        }
-    }
-
-    const whereString = whereClauses.length > 0 ? `WHERE ${whereClauses.join(' AND ')}` : '';
-
-    // 3. Consulta de CONTEO
-    const countSql = `
-        SELECT COUNT(DISTINCT T1.CVE_ART) AS TOTAL_REGISTROS
-        FROM INVE02 T1
-        LEFT JOIN CVES_ALTER02 T2 ON T1.CVE_ART = T2.CVE_ART
-        LEFT JOIN INVE_CLIB02 T4 ON T1.CVE_ART = T4.CVE_PROD
-        ${whereString};
-    `;
-    
-    // 4. Consulta de DATOS
-    const dataSql = `
-        SELECT FIRST ${limit} SKIP ${offset}
+    const sql = `
+        SELECT FIRST ${numLimit} SKIP ${numOffset}
             T1.CVE_ART, T1.DESCR, T1.UNI_MED, T1.FCH_ULTCOM, T1.ULT_COSTO, T1.LIN_PROD,
             T4.CAMPLIB1 AS DIAM_INT, T4.CAMPLIB2 AS DIAM_EXT, T4.CAMPLIB3 AS ALTURA,
             T4.CAMPLIB7 AS SECCION, T4.CAMPLIB13 AS PERFIL, 
@@ -1252,157 +660,13 @@ app.get('/clavesalternas/filter-ranges', async (req, res) => {
             T4.CAMPLIB17 AS SIST_MED, T4.CAMPLIB19 AS DESC_ECOMM, T4.CAMPLIB21 AS GENERO,
             T4.CAMPLIB22 AS FAMILIA, T4.CAMPLIB28 AS COLOCACION,
             COALESCE(MAX(T5.PRECIO), 0.00) AS PRECIO, 
-            MAX(CASE WHEN TRIM(T2.CVE_CLPV) = '3' THEN T2.CVE_ALTER ELSE NULL END) AS PROV1, 
-            MAX(CASE WHEN TRIM(T2.CVE_CLPV) = '35' THEN T2.CVE_ALTER ELSE NULL END) AS PROV2,
-            MAX(CASE WHEN T6.CVE_ALM = '1' THEN T6.EXIST ELSE NULL END) AS ALM_1_EXIST,
-            MAX(CASE WHEN T6.CVE_ALM = '3' THEN T6.EXIST ELSE NULL END) AS ALM_3_EXIST,
-            MAX(CASE WHEN T6.CVE_ALM = '5' THEN T6.EXIST ELSE NULL END) AS ALM_5_EXIST,
-            MAX(CASE WHEN T6.CVE_ALM = '6' THEN T6.EXIST ELSE NULL END) AS ALM_6_EXIST,
-            MAX(CASE WHEN T6.CVE_ALM = '7' THEN T6.EXIST ELSE NULL END) AS ALM_7_EXIST
-        FROM INVE02 T1
-        LEFT JOIN CVES_ALTER02 T2 ON T1.CVE_ART = T2.CVE_ART
-        LEFT JOIN INVE_CLIB02 T4 ON T1.CVE_ART = T4.CVE_PROD
-        LEFT JOIN PRECIO_X_PROD02 T5 ON T1.CVE_ART = T5.CVE_ART AND TRIM(T5.CVE_PRECIO) = ? 
-        LEFT JOIN MULT02 T6 ON T1.CVE_ART = T6.CVE_ART
-        ${whereString}
-        GROUP BY 1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18
-        ORDER BY T1.CVE_ART;
-    `;
-
-    try {
-        // Ejecutar Conteo
-        const countResult = await db.query(countSql, params);
-        const totalRegistros = countResult[0].TOTAL_REGISTROS || 0;
-
-        if (totalRegistros === 0 && Object.keys(req.query).some(key => key !== 'limit' && key !== 'offset')) {
-            return res.status(404).json({ message: 'No se encontraron resultados.' });
-        }
-
-        // Ejecutar Datos
-        let dataResult = await db.query(dataSql, [cvePrecio, ...params]); 
-
-        // 5. Consultar Empresa 3 (Fresnillo2 - Almacén 3)
-        if (dataResult.length > 0) {
-            const articulosIds = dataResult.map(item => item.CVE_ART.trim());
-            const sqlEmp3 = `
-                SELECT TRIM(CVE_ART) AS ART, EXIST 
-                FROM MULT03 
-                WHERE CVE_ALM = 3 AND CVE_ART IN (${articulosIds.map(() => '?').join(',')})
-            `;
-
-            try {
-                const resEmp3 = await db3.query(sqlEmp3, articulosIds);
-                const existenciaEmp3Map = {};
-                resEmp3.forEach(row => {
-                    existenciaEmp3Map[row.ART] = row.EXIST;
-                });
-
-                dataResult = dataResult.map(item => ({
-                    ...item,
-                    ALM_10_EXIST: existenciaEmp3Map[item.CVE_ART.trim()] || 0
-                }));
-            } catch (err3) {
-                console.error("Error en DB3:", err3);
-                dataResult = dataResult.map(item => ({ ...item, ALM_10_EXIST: 0 }));
-            }
-        }
-
-        // 6. Post-procesamiento
-        dataResult = processExistencias(dataResult);
-
-        const totalPages = Math.ceil(totalRegistros / limit);
-        const currentPage = Math.floor(offset / limit) + 1;
-        
-        res.json({
-            data: dataResult,
-            pagination: {
-                currentPage,
-                totalPages,
-                totalRecords: totalRegistros,
-                limit
-            },
-        });
-        
-    } catch (error) {
-        console.error('Error en filter:', error);
-        res.status(500).json({ error: 'Error interno del servidor.', detalles: error.message });
-    }
-}); */
-
-app.get('/clavesalternas/filter', async (req, res) => {
-    const limit = parseInt(req.query.limit) || 100;
-    const offset = parseInt(req.query.offset) || 0;
-    const { SUCURSAL } = req.query; 
-    const cvePrecio = SUCURSAL ? SUCURSAL.toString() : '1'; 
-
-    const filterMap = {
-        FAMILIA: 'T4.CAMPLIB22',
-        DIAM_INT: 'T4.CAMPLIB1',
-        DIAM_EXT: 'T4.CAMPLIB2',
-        ALTURA: 'T4.CAMPLIB3',
-        SECCION: 'T4.CAMPLIB7',
-        PERFIL: 'T4.CAMPLIB13', 
-        SIST_MED: 'T4.CAMPLIB17',
-        COLOCACION: 'T4.CAMPLIB28',
-        LINEA: 'T1.LIN_PROD'
-    };
-
-    const numericDimensionalFields = ['T4.CAMPLIB1', 'T4.CAMPLIB2', 'T4.CAMPLIB3', 'T4.CAMPLIB7'];
-    
-    // Mantenemos T2.TIPO = 'P' porque entiendo que solo quieres productos con clave principal
-    let whereClauses = ["T2.TIPO = 'P'"]; 
-    let params = [];
-
-    for (const alias in filterMap) {
-        const column = filterMap[alias]; 
-        let queryValue = req.query[alias.toLowerCase()]; 
-
-        if (queryValue) {
-            queryValue = queryValue.trim();
-            if (queryValue === '') continue; 
-
-            if (numericDimensionalFields.includes(column)) {
-                const cleanNumericValue = parseFloat(queryValue.replace(',', '.'));
-                if (isNaN(cleanNumericValue)) continue; 
-                
-                // COALESCE asegura que si el campo está vacío, se trate como 0 y no se descarte la fila
-                const dbColumnExpression = `CAST(REPLACE(COALESCE(NULLIF(TRIM(${column}), ''), '0'), ',', '.') AS NUMERIC(15, 5))`;
-                whereClauses.push(`ABS(${dbColumnExpression} - CAST(? AS NUMERIC(15, 5))) <= 0.00001`);
-                params.push(cleanNumericValue); 
-            } else {
-                // COALESCE asegura que si el campo texto es NULL, se trate como '' (cadena vacía)
-                const dbColumnExpression = `UPPER(TRIM(COALESCE(${column}, '')))`;
-                whereClauses.push(`${dbColumnExpression} LIKE ?`);
-                params.push(`%${queryValue.toUpperCase()}%`);
-            }
-        }
-    }
-
-    const whereString = `WHERE ${whereClauses.join(' AND ')}`;
-
-    // CONSULTA REESTRUCTURADA:
-    // 1. Usamos LEFT JOIN para TODO excepto para CVES_ALTER02 (T2) que define el TIPO='P'
-    // 2. Colocamos el filtro de CVE_PRECIO dentro del ON del LEFT JOIN, no en el WHERE
-    const dataSql = `
-        SELECT FIRST ${limit} SKIP ${offset}
-            T1.CVE_ART, T1.DESCR, T1.UNI_MED, T1.FCH_ULTCOM, T1.ULT_COSTO, T1.LIN_PROD,
-            T4.CAMPLIB1 AS DIAM_INT, T4.CAMPLIB2 AS DIAM_EXT, T4.CAMPLIB3 AS ALTURA,
-            T4.CAMPLIB7 AS SECCION, T4.CAMPLIB13 AS PERFIL, 
-            T4.CAMPLIB15 AS CLA_SYR, T4.CAMPLIB16 AS CLA_LC,
-            T4.CAMPLIB17 AS SIST_MED, T4.CAMPLIB19 AS DESC_ECOMM, T4.CAMPLIB21 AS GENERO,
-            T4.CAMPLIB22 AS FAMILIA, T4.CAMPLIB28 AS COLOCACION,
-            COALESCE(MAX(T5.PRECIO), 0.00) AS PRECIO, 
-            MAX(CASE WHEN TRIM(T2.CVE_CLPV) = '3' THEN T2.CVE_ALTER ELSE NULL END) AS PROV1, 
-            MAX(CASE WHEN TRIM(T2.CVE_CLPV) = '35' THEN T2.CVE_ALTER ELSE NULL END) AS PROV2,
             COALESCE(MAX(CASE WHEN T6.CVE_ALM = 1 THEN T6.EXIST ELSE NULL END), 0) AS ALM_1_EXIST,
             COALESCE(MAX(CASE WHEN T6.CVE_ALM = 3 THEN T6.EXIST ELSE NULL END), 0) AS ALM_3_EXIST,
             COALESCE(MAX(CASE WHEN T6.CVE_ALM = 5 THEN T6.EXIST ELSE NULL END), 0) AS ALM_5_EXIST,
             COALESCE(MAX(CASE WHEN T6.CVE_ALM = 6 THEN T6.EXIST ELSE NULL END), 0) AS ALM_6_EXIST,
             COALESCE(MAX(CASE WHEN T6.CVE_ALM = 7 THEN T6.EXIST ELSE NULL END), 0) AS ALM_7_EXIST
         FROM INVE02 T1
-        INNER JOIN CVES_ALTER02 T2 ON T1.CVE_ART = T2.CVE_ART
         LEFT JOIN INVE_CLIB02 T4 ON T1.CVE_ART = T4.CVE_PROD
-        -- El filtro de precio DEBE ir aquí en el JOIN para que si no hay precio, la fila de T1 no se pierda
         LEFT JOIN PRECIO_X_PROD02 T5 ON (T1.CVE_ART = T5.CVE_ART AND TRIM(T5.CVE_PRECIO) = CAST(? AS VARCHAR(10)))
         LEFT JOIN MULT02 T6 ON T1.CVE_ART = T6.CVE_ART
         ${whereString}
@@ -1411,40 +675,38 @@ app.get('/clavesalternas/filter', async (req, res) => {
     `;
 
     try {
-        const countSql = `SELECT COUNT(DISTINCT T1.CVE_ART) AS TOTAL 
-                          FROM INVE02 T1 
-                          INNER JOIN CVES_ALTER02 T2 ON T1.CVE_ART = T2.CVE_ART 
-                          LEFT JOIN INVE_CLIB02 T4 ON T1.CVE_ART = T4.CVE_PROD 
-                          ${whereString}`;
+        let dataResult = await db.query(sql, params);
         
-        const countRes = await db.query(countSql, params);
+        // Conteo total para paginación (usando la misma lógica inclusiva)
+        const countSql = `SELECT COUNT(DISTINCT T1.CVE_ART) AS TOTAL FROM INVE02 T1 LEFT JOIN INVE_CLIB02 T4 ON T1.CVE_ART = T4.CVE_PROD ${whereString}`;
+        const countRes = await db.query(countSql, params.slice(1)); // Quitamos cvePrecio que es solo para el join
         const totalRecords = countRes[0].TOTAL || 0;
 
-        let dataResult = await db.query(dataSql, [cvePrecio, ...params]); 
-
-        // Enriquecer con Fresnillo2 (DB3)
         if (dataResult.length > 0) {
             const ids = dataResult.map(item => item.CVE_ART.trim());
             const sql3 = `SELECT TRIM(CVE_ART) AS ART, EXIST FROM MULT03 WHERE CVE_ALM = 3 AND CVE_ART IN (${ids.map(() => '?').join(',')})`;
             const res3 = await db3.query(sql3, ids);
             const map3 = {};
             res3.forEach(r => map3[r.ART] = r.EXIST);
-            dataResult = dataResult.map(item => ({ 
-                ...item, 
-                ALM_10_EXIST: map3[item.CVE_ART.trim()] || 0 
-            }));
+            dataResult = dataResult.map(item => ({ ...item, ALM_10_EXIST: map3[item.CVE_ART.trim()] || 0 }));
         }
 
         dataResult = processExistencias(dataResult);
-        res.json({ data: dataResult, pagination: { totalRecords, limit } });
-
+        res.json({
+            data: dataResult,
+            pagination: {
+                totalRecords,
+                limit: numLimit,
+                currentPage: Math.floor(numOffset / numLimit) + 1
+            }
+        });
     } catch (error) {
-        console.error("Error en filter:", error);
         res.status(500).json({ error: error.message });
     }
 });
 
-app.get('/clavesalternas/filter2', async (req, res) => {
+
+app.get('/clavesalternas/filter', async (req, res) => {
     const { SUCURSAL, familia, diam_int, diam_ext, altura, seccion, limit, offset } = req.query;
     const cvePrecio = SUCURSAL ? SUCURSAL.toString() : '1';
     const numLimit = parseInt(limit) || 100;
