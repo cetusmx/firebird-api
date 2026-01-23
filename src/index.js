@@ -670,94 +670,53 @@ app.get('/clavesalternas/search2', async (req, res) => {
     const searchTerm = query ? query.toUpperCase().trim() : '';
     const cvePrecio = SUCURSAL ? SUCURSAL.toString() : '1';
 
-    console.log(`[SEARCH2] Iniciando búsqueda para: "${searchTerm}" en Sucursal: ${cvePrecio}`);
+    if (!searchTerm) return res.status(400).json({ error: 'Query requerido' });
 
-    if (!searchTerm) {
-        return res.status(400).json({ error: 'Proporciona un término de búsqueda.' });
-    }
-
-    // Consulta ultra-plana para diagnóstico
-    // Nota: Usamos CAST(? AS VARCHAR(100)) para evitar el error -303 de truncamiento
     const sql = `
         SELECT 
-            T1.CVE_ART, 
-            T1.DESCR, 
-            T1.FCH_ULTCOM,
-            T1.ULT_COSTO,
-            COALESCE(T5.PRECIO, -1) AS DB_PRECIO,
-            COALESCE(T6.EXIST, -1) AS DB_EXIST_ALM1,
-            T2.CVE_ALTER AS DB_CLAVE_ALT,
-            T2.TIPO AS DB_TIPO_ALT,
-            T4.CAMPLIB22 AS DB_FAMILIA
+            T1.CVE_ART, T1.DESCR, T1.UNI_MED, T1.FCH_ULTCOM, T1.ULT_COSTO, T1.LIN_PROD,
+            T4.CAMPLIB1 AS DIAM_INT, T4.CAMPLIB2 AS DIAM_EXT, T4.CAMPLIB3 AS ALTURA,
+            T4.CAMPLIB7 AS SECCION, T4.CAMPLIB13 AS PERFIL, 
+            T4.CAMPLIB15 AS CLA_SYR, T4.CAMPLIB16 AS CLA_LC,
+            T4.CAMPLIB17 AS SIST_MED, T4.CAMPLIB19 AS DESC_ECOMM, T4.CAMPLIB21 AS GENERO,
+            T4.CAMPLIB22 AS FAMILIA, T4.CAMPLIB28 AS COLOCACION,
+            COALESCE(MAX(T5.PRECIO), 0.00) AS PRECIO,
+            COALESCE(MAX(CASE WHEN T6.CVE_ALM = 1 THEN T6.EXIST ELSE NULL END), 0) AS ALM_1_EXIST,
+            COALESCE(MAX(CASE WHEN T6.CVE_ALM = 3 THEN T6.EXIST ELSE NULL END), 0) AS ALM_3_EXIST,
+            COALESCE(MAX(CASE WHEN T6.CVE_ALM = 5 THEN T6.EXIST ELSE NULL END), 0) AS ALM_5_EXIST,
+            COALESCE(MAX(CASE WHEN T6.CVE_ALM = 6 THEN T6.EXIST ELSE NULL END), 0) AS ALM_6_EXIST,
+            COALESCE(MAX(CASE WHEN T6.CVE_ALM = 7 THEN T6.EXIST ELSE NULL END), 0) AS ALM_7_EXIST
         FROM INVE02 T1
-        LEFT JOIN CVES_ALTER02 T2 ON (T1.CVE_ART = T2.CVE_ART)
-        LEFT JOIN INVE_CLIB02 T4 ON (T1.CVE_ART = T4.CVE_PROD)
+        LEFT JOIN CVES_ALTER02 T2 ON T1.CVE_ART = T2.CVE_ART
+        LEFT JOIN INVE_CLIB02 T4 ON T1.CVE_ART = T4.CVE_PROD
         LEFT JOIN PRECIO_X_PROD02 T5 ON (T1.CVE_ART = T5.CVE_ART AND TRIM(T5.CVE_PRECIO) = CAST(? AS VARCHAR(10)))
-        LEFT JOIN MULT02 T6 ON (T1.CVE_ART = T6.CVE_ART AND T6.CVE_ALM = 1)
+        LEFT JOIN MULT02 T6 ON T1.CVE_ART = T6.CVE_ART
         WHERE 
             T1.CVE_ART = CAST(? AS VARCHAR(100)) OR
-            T2.CVE_ALTER = CAST(? AS VARCHAR(100)) OR
+            UPPER(T2.CVE_ALTER) = CAST(? AS VARCHAR(100)) OR
             UPPER(T1.DESCR) LIKE CAST(? AS VARCHAR(100))
+        GROUP BY 1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18
+        ORDER BY T1.CVE_ART
     `;
-
-    const startTime = Date.now();
 
     try {
         const likeTerm = `%${searchTerm}%`;
-        const params = [cvePrecio, searchTerm, searchTerm, likeTerm];
-        
-        console.log('[SEARCH2] Ejecutando SQL en DB Principal...');
-        let dataResult = await db.query(sql, params);
-        
-        console.log(`[SEARCH2] Filas encontradas: ${dataResult.length}. Tiempo: ${Date.now() - startTime}ms`);
+        let dataResult = await db.query(sql, [cvePrecio, searchTerm, searchTerm, likeTerm]);
 
-        // Diagnóstico: Si no hay resultados, imprimimos qué se buscó exactamente
-        if (dataResult.length === 0) {
-            console.log(`[SEARCH2] ADVERTENCIA: No se encontró nada para "${searchTerm}"`);
-        } else {
-            // Log del primer resultado para ver qué trae la DB realmente
-            console.log('[SEARCH2] Muestra del primer resultado:', {
-                CVE: dataResult[0].CVE_ART,
-                DESC: dataResult[0].DESCR,
-                ALT: dataResult[0].DB_CLAVE_ALT,
-                TIPO: dataResult[0].DB_TIPO_ALT
-            });
-        }
-
-        // Integración con Empresa 3 (Fresnillo2)
+        // Enriquecer con Empresa 3
         if (dataResult.length > 0) {
             const ids = dataResult.map(item => item.CVE_ART.trim());
             const sql3 = `SELECT TRIM(CVE_ART) AS ART, EXIST FROM MULT03 WHERE CVE_ALM = 3 AND CVE_ART IN (${ids.map(() => '?').join(',')})`;
-            
-            try {
-                const res3 = await db3.query(sql3, ids);
-                const map3 = {};
-                res3.forEach(r => map3[r.ART] = r.EXIST);
-                dataResult = dataResult.map(item => ({ 
-                    ...item, 
-                    DB_EXIST_ALM10: map3[item.CVE_ART.trim()] !== undefined ? map3[item.CVE_ART.trim()] : 'N/A'
-                }));
-            } catch (e) {
-                console.error('[SEARCH2] Error en DB3:', e.message);
-                dataResult = dataResult.map(item => ({ ...item, DB_EXIST_ALM10: 'ERROR' }));
-            }
+            const res3 = await db3.query(sql3, ids);
+            const map3 = {};
+            res3.forEach(r => map3[r.ART] = r.EXIST);
+            dataResult = dataResult.map(item => ({ ...item, ALM_10_EXIST: map3[item.CVE_ART.trim()] || 0 }));
         }
 
-        res.json({
-            meta: {
-                query_busqueda: searchTerm,
-                total: dataResult.length,
-                ms: Date.now() - startTime
-            },
-            results: dataResult
-        });
-
+        dataResult = processExistencias(dataResult);
+        res.json(dataResult); // Estructura original: devuelve el array directamente
     } catch (error) {
-        console.error('[SEARCH2] ERROR CRÍTICO:', error);
-        res.status(500).json({ 
-            error: error.message,
-            sql_state: error.gdscode
-        });
+        res.status(500).json({ error: error.message });
     }
 });
 
@@ -1486,11 +1445,13 @@ app.get('/clavesalternas/filter', async (req, res) => {
 });
 
 app.get('/clavesalternas/filter2', async (req, res) => {
-    const { SUCURSAL, familia, diam_int, diam_ext, altura, seccion } = req.query;
+    const { SUCURSAL, familia, diam_int, diam_ext, altura, seccion, limit, offset } = req.query;
     const cvePrecio = SUCURSAL ? SUCURSAL.toString() : '1';
+    const numLimit = parseInt(limit) || 100;
+    const numOffset = parseInt(offset) || 0;
     
-    console.log(`[FILTER2] Iniciando filtrado técnico. Sucursal: ${cvePrecio}`);
-    console.log(`[FILTER2] Parámetros recibidos:`, { familia, diam_int, diam_ext, altura, seccion });
+    let whereClauses = ["1=1"];
+    let params = [cvePrecio]; 
 
     const dimensionalFields = {
         DIAM_INT: 'T4.CAMPLIB1',
@@ -1499,25 +1460,18 @@ app.get('/clavesalternas/filter2', async (req, res) => {
         SECCION: 'T4.CAMPLIB7'
     };
 
-    let whereClauses = ["1=1"]; // Base neutral para permitir cualquier combinación
-    let params = [cvePrecio]; // El primer parámetro siempre es la sucursal para el JOIN de precios
-
-    // 1. Procesamiento de dimensiones con logs
     for (const key in dimensionalFields) {
         const val = req.query[key.toLowerCase()];
         if (val) {
             const numVal = parseFloat(val.replace(',', '.'));
             if (!isNaN(numVal)) {
-                // Usamos la expresión de conversión numérica robusta
-                const dbNum = `CAST(REPLACE(COALESCE(NULLIF(TRIM(${dimensionalFields[key]}), ''), '0'), ',', '.') AS NUMERIC(15, 5))`;
-                whereClauses.push(`ABS(${dbNum} - CAST(? AS NUMERIC(15, 5))) <= 0.001`);
+                const dbNum = `CAST(REPLACE(COALESCE(NULLIF(TRIM(${dimensionalFields[key]}), ''), '0'), ',', '.') AS NUMERIC(15, 4))`;
+                whereClauses.push(`ABS(${dbNum} - CAST(? AS NUMERIC(15, 4))) <= 0.001`);
                 params.push(numVal);
-                console.log(`[FILTER2] Añadiendo filtro numérico para ${key}: ${numVal}`);
             }
         }
     }
 
-    // 2. Filtro de familia (texto)
     if (familia) {
         whereClauses.push(`UPPER(TRIM(COALESCE(T4.CAMPLIB22, ''))) = UPPER(TRIM(?))`);
         params.push(familia);
@@ -1525,56 +1479,47 @@ app.get('/clavesalternas/filter2', async (req, res) => {
 
     const whereString = `WHERE ${whereClauses.join(' AND ')}`;
 
-    // SQL simplificado sin GROUP BY para ver todas las filas crudas
+    // Consulta con nombres de campos finales para el frontend
     const sql = `
-        SELECT 
-            T1.CVE_ART, 
-            T1.DESCR, 
-            T1.FCH_ULTCOM,
-            T4.CAMPLIB1 AS DB_DIAM_INT,
-            T4.CAMPLIB22 AS DB_FAMILIA,
-            COALESCE(T5.PRECIO, -1) AS DB_PRECIO,
-            COALESCE(T6.EXIST, -1) AS DB_EXIST_ALM1,
-            T2.CVE_ALTER AS DB_CLAVE_ALT,
-            T2.TIPO AS DB_TIPO_ALT
+        SELECT FIRST ${numLimit} SKIP ${numOffset}
+            T1.CVE_ART, T1.DESCR, T1.UNI_MED, T1.FCH_ULTCOM, T1.ULT_COSTO, T1.LIN_PROD,
+            T4.CAMPLIB1 AS DIAM_INT, T4.CAMPLIB2 AS DIAM_EXT, T4.CAMPLIB3 AS ALTURA,
+            T4.CAMPLIB7 AS SECCION, T4.CAMPLIB13 AS PERFIL, 
+            T4.CAMPLIB15 AS CLA_SYR, T4.CAMPLIB16 AS CLA_LC,
+            T4.CAMPLIB17 AS SIST_MED, T4.CAMPLIB19 AS DESC_ECOMM, T4.CAMPLIB21 AS GENERO,
+            T4.CAMPLIB22 AS FAMILIA, T4.CAMPLIB28 AS COLOCACION,
+            COALESCE(MAX(T5.PRECIO), 0.00) AS PRECIO, 
+            COALESCE(MAX(CASE WHEN T6.CVE_ALM = 1 THEN T6.EXIST ELSE NULL END), 0) AS ALM_1_EXIST,
+            COALESCE(MAX(CASE WHEN T6.CVE_ALM = 3 THEN T6.EXIST ELSE NULL END), 0) AS ALM_3_EXIST,
+            COALESCE(MAX(CASE WHEN T6.CVE_ALM = 5 THEN T6.EXIST ELSE NULL END), 0) AS ALM_5_EXIST,
+            COALESCE(MAX(CASE WHEN T6.CVE_ALM = 6 THEN T6.EXIST ELSE NULL END), 0) AS ALM_6_EXIST,
+            COALESCE(MAX(CASE WHEN T6.CVE_ALM = 7 THEN T6.EXIST ELSE NULL END), 0) AS ALM_7_EXIST
         FROM INVE02 T1
-        LEFT JOIN CVES_ALTER02 T2 ON T1.CVE_ART = T2.CVE_ART
         LEFT JOIN INVE_CLIB02 T4 ON T1.CVE_ART = T4.CVE_PROD
         LEFT JOIN PRECIO_X_PROD02 T5 ON (T1.CVE_ART = T5.CVE_ART AND TRIM(T5.CVE_PRECIO) = CAST(? AS VARCHAR(10)))
-        LEFT JOIN MULT02 T6 ON (T1.CVE_ART = T6.CVE_ART AND T6.CVE_ALM = 1)
+        LEFT JOIN MULT02 T6 ON T1.CVE_ART = T6.CVE_ART
         ${whereString}
-        ORDER BY T1.CVE_ART
+        GROUP BY 1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18
+        ORDER BY T1.CVE_ART;
     `;
 
-    const startTime = Date.now();
-
     try {
-        console.log('[FILTER2] Ejecutando Query...');
-        const dataResult = await db.query(sql, params);
+        let dataResult = await db.query(sql, params);
         
-        console.log(`[FILTER2] Éxito. Filas encontradas: ${dataResult.length} en ${Date.now() - startTime}ms`);
-
+        // Enriquecimiento con Fresnillo2 (Almacén 10)
         if (dataResult.length > 0) {
-            console.log('[FILTER2] Primer registro encontrado:', {
-                CVE: dataResult[0].CVE_ART,
-                DIAM: dataResult[0].DB_DIAM_INT,
-                PRECIO: dataResult[0].DB_PRECIO,
-                EXIST: dataResult[0].DB_EXIST_ALM1
-            });
+            const ids = dataResult.map(item => item.CVE_ART.trim());
+            const sql3 = `SELECT TRIM(CVE_ART) AS ART, EXIST FROM MULT03 WHERE CVE_ALM = 3 AND CVE_ART IN (${ids.map(() => '?').join(',')})`;
+            const res3 = await db3.query(sql3, ids);
+            const map3 = {};
+            res3.forEach(r => map3[r.ART] = r.EXIST);
+            dataResult = dataResult.map(item => ({ ...item, ALM_10_EXIST: map3[item.CVE_ART.trim()] || 0 }));
         }
 
-        res.json({
-            meta: {
-                parametros: { familia, diam_int, diam_ext, altura, seccion },
-                total: dataResult.length,
-                ms: Date.now() - startTime
-            },
-            results: dataResult
-        });
-
+        dataResult = processExistencias(dataResult);
+        res.json({ data: dataResult }); // Estructura original: objeto con propiedad 'data'
     } catch (error) {
-        console.error('[FILTER2] ERROR:', error.message);
-        res.status(500).json({ error: error.message, stack: error.gdscode });
+        res.status(500).json({ error: error.message });
     }
 });
 
