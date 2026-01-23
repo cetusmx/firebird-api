@@ -586,7 +586,7 @@ app.get('/clavesalternas/search', async (req, res) => {
     }
 });
 
-app.get('/clavesalternas/filter-ranges', async (req, res) => {
+/* app.get('/clavesalternas/filter-ranges', async (req, res) => {
     const limit = parseInt(req.query.limit) || 100;
     const offset = parseInt(req.query.offset) || 0;
     const { SUCURSAL } = req.query; 
@@ -711,6 +711,145 @@ app.get('/clavesalternas/filter-ranges', async (req, res) => {
             }
         });
     } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+}); */
+
+
+app.get('/clavesalternas/filter-ranges', async (req, res) => {
+    const limit = parseInt(req.query.limit) || 100;
+    const offset = parseInt(req.query.offset) || 0;
+    const { SUCURSAL } = req.query; 
+    const cvePrecio = SUCURSAL ? parseInt(SUCURSAL) : 1; 
+
+    const dimensionalFields = {
+        DIAM_INT: 'T4.CAMPLIB1',
+        DIAM_EXT: 'T4.CAMPLIB2',
+        ALTURA: 'T4.CAMPLIB3',
+        SECCION: 'T4.CAMPLIB7'
+    };
+
+    const extraFilters = {
+        FAMILIA: 'T4.CAMPLIB22',
+        COLOCACION: 'T4.CAMPLIB28',
+        LINEA: 'T1.LIN_PROD',
+        PERFIL: 'T4.CAMPLIB13',
+        SIST_MED: 'T4.CAMPLIB17'
+    };
+    
+    let whereClauses = ["T2.TIPO = 'P'"];
+    let params = [];
+
+    // 1. Lógica de Rangos - Ajustada para ser más permisiva con valores vacíos en la DB
+    for (const alias in dimensionalFields) {
+        const column = dimensionalFields[alias];
+        const lowerAlias = alias.toLowerCase();
+        
+        const valMin = req.query[`${lowerAlias}_min`];
+        const valMax = req.query[`${lowerAlias}_max`];
+
+        if (valMin !== undefined && valMax !== undefined) {
+            // Usamos COALESCE '0' para que si el campo está vacío en la DB no rompa la comparación numérica
+            const dbNum = `CAST(REPLACE(COALESCE(NULLIF(TRIM(${column}), ''), '0'), ',', '.') AS NUMERIC(15, 5))`;
+            
+            whereClauses.push(`${dbNum} BETWEEN CAST(? AS NUMERIC(15, 5)) AND CAST(? AS NUMERIC(15, 5))`);
+            params.push(parseFloat(valMin.replace(',', '.')));
+            params.push(parseFloat(valMax.replace(',', '.')));
+        }
+    }
+
+    for (const alias in extraFilters) {
+        const column = extraFilters[alias];
+        const val = req.query[alias.toLowerCase()];
+        if (val) {
+            whereClauses.push(`UPPER(TRIM(COALESCE(${column}, ''))) LIKE ?`);
+            params.push(`%${val.toUpperCase().trim()}%`);
+        }
+    }
+
+    const whereString = `WHERE ${whereClauses.join(' AND ')}`;
+
+    // Consulta de Datos corregida
+    // Agregamos COALESCE a FCH_ULTCOM y aseguramos que el GROUP BY sea sólido
+    const dataSql = `
+        SELECT FIRST ${limit} SKIP ${offset}
+            T1.CVE_ART, 
+            T1.DESCR, 
+            T1.UNI_MED, 
+            T1.FCH_ULTCOM, -- No se puede usar COALESCE aquí si quieres el objeto Date original, pero Firebird lo maneja bien
+            T1.ULT_COSTO, 
+            T1.LIN_PROD,
+            T4.CAMPLIB1 AS DIAM_INT, 
+            T4.CAMPLIB2 AS DIAM_EXT, 
+            T4.CAMPLIB3 AS ALTURA,
+            T4.CAMPLIB7 AS SECCION, 
+            T4.CAMPLIB13 AS PERFIL, 
+            T4.CAMPLIB15 AS CLA_SYR, 
+            T4.CAMPLIB16 AS CLA_LC,
+            T4.CAMPLIB17 AS SIST_MED, 
+            T4.CAMPLIB19 AS DESC_ECOMM, 
+            T4.CAMPLIB21 AS GENERO,
+            T4.CAMPLIB22 AS FAMILIA, 
+            T4.CAMPLIB28 AS COLOCACION,
+            COALESCE(MAX(T5.PRECIO), 0.00) AS PRECIO, 
+            MAX(CASE WHEN TRIM(T2.CVE_CLPV) = '3' THEN T2.CVE_ALTER ELSE NULL END) AS PROV1, 
+            MAX(CASE WHEN TRIM(T2.CVE_CLPV) = '35' THEN T2.CVE_ALTER ELSE NULL END) AS PROV2,
+            MAX(CASE WHEN T6.CVE_ALM = '1' THEN T6.EXIST ELSE NULL END) AS ALM_1_EXIST,
+            MAX(CASE WHEN T6.CVE_ALM = '3' THEN T6.EXIST ELSE NULL END) AS ALM_3_EXIST,
+            MAX(CASE WHEN T6.CVE_ALM = '5' THEN T6.EXIST ELSE NULL END) AS ALM_5_EXIST,
+            MAX(CASE WHEN T6.CVE_ALM = '6' THEN T6.EXIST ELSE NULL END) AS ALM_6_EXIST,
+            MAX(CASE WHEN T6.CVE_ALM = '7' THEN T6.EXIST ELSE NULL END) AS ALM_7_EXIST
+        FROM INVE02 T1
+        INNER JOIN CVES_ALTER02 T2 ON T1.CVE_ART = T2.CVE_ART
+        LEFT JOIN INVE_CLIB02 T4 ON T1.CVE_ART = T4.CVE_PROD
+        LEFT JOIN PRECIO_X_PROD02 T5 ON T1.CVE_ART = T5.CVE_ART AND TRIM(T5.CVE_PRECIO) = CAST(? AS VARCHAR(10))
+        LEFT JOIN MULT02 T6 ON T1.CVE_ART = T6.CVE_ART
+        ${whereString}
+        GROUP BY 1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18
+        ORDER BY T1.CVE_ART;
+    `;
+
+    const countSql = `
+        SELECT COUNT(DISTINCT T1.CVE_ART) AS TOTAL_REGISTROS
+        FROM INVE02 T1
+        INNER JOIN CVES_ALTER02 T2 ON T1.CVE_ART = T2.CVE_ART
+        LEFT JOIN INVE_CLIB02 T4 ON T1.CVE_ART = T4.CVE_PROD
+        ${whereString};
+    `;
+
+    try {
+        const countRes = await db.query(countSql, params);
+        const totalRegistros = countRes[0].TOTAL_REGISTROS || 0;
+
+        let dataResult = await db.query(dataSql, [cvePrecio, ...params]); 
+
+        if (dataResult.length > 0) {
+            const ids = dataResult.map(item => item.CVE_ART.trim());
+            const sql3 = `SELECT TRIM(CVE_ART) AS ART, EXIST FROM MULT03 WHERE CVE_ALM = 3 AND CVE_ART IN (${ids.map(() => '?').join(',')})`;
+            
+            try {
+                const res3 = await db3.query(sql3, ids);
+                const map3 = {};
+                res3.forEach(r => map3[r.ART] = r.EXIST);
+                dataResult = dataResult.map(item => ({ ...item, ALM_10_EXIST: map3[item.CVE_ART.trim()] || 0 }));
+            } catch (err3) {
+                dataResult = dataResult.map(item => ({ ...item, ALM_10_EXIST: 0 }));
+            }
+        }
+
+        dataResult = processExistencias(dataResult);
+
+        res.json({
+            data: dataResult,
+            pagination: {
+                totalRecords: totalRegistros,
+                totalPages: Math.ceil(totalRegistros / limit),
+                currentPage: Math.floor(offset / limit) + 1,
+                limit
+            }
+        });
+    } catch (error) {
+        console.error("Error en filter-ranges:", error);
         res.status(500).json({ error: error.message });
     }
 });
