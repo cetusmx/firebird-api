@@ -1485,6 +1485,99 @@ app.get('/clavesalternas/filter', async (req, res) => {
     }
 });
 
+app.get('/clavesalternas/filter2', async (req, res) => {
+    const { SUCURSAL, familia, diam_int, diam_ext, altura, seccion } = req.query;
+    const cvePrecio = SUCURSAL ? SUCURSAL.toString() : '1';
+    
+    console.log(`[FILTER2] Iniciando filtrado técnico. Sucursal: ${cvePrecio}`);
+    console.log(`[FILTER2] Parámetros recibidos:`, { familia, diam_int, diam_ext, altura, seccion });
+
+    const dimensionalFields = {
+        DIAM_INT: 'T4.CAMPLIB1',
+        DIAM_EXT: 'T4.CAMPLIB2',
+        ALTURA: 'T4.CAMPLIB3',
+        SECCION: 'T4.CAMPLIB7'
+    };
+
+    let whereClauses = ["1=1"]; // Base neutral para permitir cualquier combinación
+    let params = [cvePrecio]; // El primer parámetro siempre es la sucursal para el JOIN de precios
+
+    // 1. Procesamiento de dimensiones con logs
+    for (const key in dimensionalFields) {
+        const val = req.query[key.toLowerCase()];
+        if (val) {
+            const numVal = parseFloat(val.replace(',', '.'));
+            if (!isNaN(numVal)) {
+                // Usamos la expresión de conversión numérica robusta
+                const dbNum = `CAST(REPLACE(COALESCE(NULLIF(TRIM(${dimensionalFields[key]}), ''), '0'), ',', '.') AS NUMERIC(15, 5))`;
+                whereClauses.push(`ABS(${dbNum} - CAST(? AS NUMERIC(15, 5))) <= 0.001`);
+                params.push(numVal);
+                console.log(`[FILTER2] Añadiendo filtro numérico para ${key}: ${numVal}`);
+            }
+        }
+    }
+
+    // 2. Filtro de familia (texto)
+    if (familia) {
+        whereClauses.push(`UPPER(TRIM(COALESCE(T4.CAMPLIB22, ''))) = UPPER(TRIM(?))`);
+        params.push(familia);
+    }
+
+    const whereString = `WHERE ${whereClauses.join(' AND ')}`;
+
+    // SQL simplificado sin GROUP BY para ver todas las filas crudas
+    const sql = `
+        SELECT 
+            T1.CVE_ART, 
+            T1.DESCR, 
+            T1.FCH_ULTCOM,
+            T4.CAMPLIB1 AS DB_DIAM_INT,
+            T4.CAMPLIB22 AS DB_FAMILIA,
+            COALESCE(T5.PRECIO, -1) AS DB_PRECIO,
+            COALESCE(T6.EXIST, -1) AS DB_EXIST_ALM1,
+            T2.CVE_ALTER AS DB_CLAVE_ALT,
+            T2.TIPO AS DB_TIPO_ALT
+        FROM INVE02 T1
+        LEFT JOIN CVES_ALTER02 T2 ON T1.CVE_ART = T2.CVE_ART
+        LEFT JOIN INVE_CLIB02 T4 ON T1.CVE_ART = T4.CVE_PROD
+        LEFT JOIN PRECIO_X_PROD02 T5 ON (T1.CVE_ART = T5.CVE_ART AND TRIM(T5.CVE_PRECIO) = CAST(? AS VARCHAR(10)))
+        LEFT JOIN MULT02 T6 ON (T1.CVE_ART = T6.CVE_ART AND T6.CVE_ALM = 1)
+        ${whereString}
+        ORDER BY T1.CVE_ART
+    `;
+
+    const startTime = Date.now();
+
+    try {
+        console.log('[FILTER2] Ejecutando Query...');
+        const dataResult = await db.query(sql, params);
+        
+        console.log(`[FILTER2] Éxito. Filas encontradas: ${dataResult.length} en ${Date.now() - startTime}ms`);
+
+        if (dataResult.length > 0) {
+            console.log('[FILTER2] Primer registro encontrado:', {
+                CVE: dataResult[0].CVE_ART,
+                DIAM: dataResult[0].DB_DIAM_INT,
+                PRECIO: dataResult[0].DB_PRECIO,
+                EXIST: dataResult[0].DB_EXIST_ALM1
+            });
+        }
+
+        res.json({
+            meta: {
+                parametros: { familia, diam_int, diam_ext, altura, seccion },
+                total: dataResult.length,
+                ms: Date.now() - startTime
+            },
+            results: dataResult
+        });
+
+    } catch (error) {
+        console.error('[FILTER2] ERROR:', error.message);
+        res.status(500).json({ error: error.message, stack: error.gdscode });
+    }
+});
+
 // Iniciar el servidor
 app.listen(port, () => {
   console.log(`Servidor escuchando en http://localhost:${port}`);
