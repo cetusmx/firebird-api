@@ -665,6 +665,101 @@ app.get('/clavesalternas/search', async (req, res) => {
     }
 });
 
+app.get('/clavesalternas/search2', async (req, res) => {
+    const { query, SUCURSAL } = req.query;
+    const searchTerm = query ? query.toUpperCase().trim() : '';
+    const cvePrecio = SUCURSAL ? SUCURSAL.toString() : '1';
+
+    console.log(`[SEARCH2] Iniciando búsqueda para: "${searchTerm}" en Sucursal: ${cvePrecio}`);
+
+    if (!searchTerm) {
+        return res.status(400).json({ error: 'Proporciona un término de búsqueda.' });
+    }
+
+    // Consulta ultra-plana para diagnóstico
+    // Nota: Usamos CAST(? AS VARCHAR(100)) para evitar el error -303 de truncamiento
+    const sql = `
+        SELECT 
+            T1.CVE_ART, 
+            T1.DESCR, 
+            T1.FCH_ULTCOM,
+            T1.ULT_COSTO,
+            COALESCE(T5.PRECIO, -1) AS DB_PRECIO,
+            COALESCE(T6.EXIST, -1) AS DB_EXIST_ALM1,
+            T2.CVE_ALTER AS DB_CLAVE_ALT,
+            T2.TIPO AS DB_TIPO_ALT,
+            T4.CAMPLIB22 AS DB_FAMILIA
+        FROM INVE02 T1
+        LEFT JOIN CVES_ALTER02 T2 ON (T1.CVE_ART = T2.CVE_ART)
+        LEFT JOIN INVE_CLIB02 T4 ON (T1.CVE_ART = T4.CVE_PROD)
+        LEFT JOIN PRECIO_X_PROD02 T5 ON (T1.CVE_ART = T5.CVE_ART AND TRIM(T5.CVE_PRECIO) = CAST(? AS VARCHAR(10)))
+        LEFT JOIN MULT02 T6 ON (T1.CVE_ART = T6.CVE_ART AND T6.CVE_ALM = 1)
+        WHERE 
+            T1.CVE_ART = CAST(? AS VARCHAR(100)) OR
+            T2.CVE_ALTER = CAST(? AS VARCHAR(100)) OR
+            UPPER(T1.DESCR) LIKE CAST(? AS VARCHAR(100))
+    `;
+
+    const startTime = Date.now();
+
+    try {
+        const likeTerm = `%${searchTerm}%`;
+        const params = [cvePrecio, searchTerm, searchTerm, likeTerm];
+        
+        console.log('[SEARCH2] Ejecutando SQL en DB Principal...');
+        let dataResult = await db.query(sql, params);
+        
+        console.log(`[SEARCH2] Filas encontradas: ${dataResult.length}. Tiempo: ${Date.now() - startTime}ms`);
+
+        // Diagnóstico: Si no hay resultados, imprimimos qué se buscó exactamente
+        if (dataResult.length === 0) {
+            console.log(`[SEARCH2] ADVERTENCIA: No se encontró nada para "${searchTerm}"`);
+        } else {
+            // Log del primer resultado para ver qué trae la DB realmente
+            console.log('[SEARCH2] Muestra del primer resultado:', {
+                CVE: dataResult[0].CVE_ART,
+                DESC: dataResult[0].DESCR,
+                ALT: dataResult[0].DB_CLAVE_ALT,
+                TIPO: dataResult[0].DB_TIPO_ALT
+            });
+        }
+
+        // Integración con Empresa 3 (Fresnillo2)
+        if (dataResult.length > 0) {
+            const ids = dataResult.map(item => item.CVE_ART.trim());
+            const sql3 = `SELECT TRIM(CVE_ART) AS ART, EXIST FROM MULT03 WHERE CVE_ALM = 3 AND CVE_ART IN (${ids.map(() => '?').join(',')})`;
+            
+            try {
+                const res3 = await db3.query(sql3, ids);
+                const map3 = {};
+                res3.forEach(r => map3[r.ART] = r.EXIST);
+                dataResult = dataResult.map(item => ({ 
+                    ...item, 
+                    DB_EXIST_ALM10: map3[item.CVE_ART.trim()] !== undefined ? map3[item.CVE_ART.trim()] : 'N/A'
+                }));
+            } catch (e) {
+                console.error('[SEARCH2] Error en DB3:', e.message);
+                dataResult = dataResult.map(item => ({ ...item, DB_EXIST_ALM10: 'ERROR' }));
+            }
+        }
+
+        res.json({
+            meta: {
+                query_busqueda: searchTerm,
+                total: dataResult.length,
+                ms: Date.now() - startTime
+            },
+            results: dataResult
+        });
+
+    } catch (error) {
+        console.error('[SEARCH2] ERROR CRÍTICO:', error);
+        res.status(500).json({ 
+            error: error.message,
+            sql_state: error.gdscode
+        });
+    }
+});
 
 /* app.get('/clavesalternas/filter-ranges', async (req, res) => {
     const limit = parseInt(req.query.limit) || 100;
