@@ -884,7 +884,7 @@ app.get('/clavesalternas/filter-ranges', async (req, res) => {
     }
 });
 
-app.get('/clavesalternas/filter', async (req, res) => {
+/* app.get('/clavesalternas/filter', async (req, res) => {
     const { SUCURSAL, familia, diam_int, diam_ext, altura, seccion, limit, offset } = req.query;
     const cvePrecio = SUCURSAL ? SUCURSAL.toString() : '1';
     const numLimit = parseInt(limit) || 10; // Límite por defecto de 10
@@ -974,6 +974,105 @@ app.get('/clavesalternas/filter', async (req, res) => {
                 currentPage: Math.floor(numOffset / numLimit) + 1,
                 totalPages: Math.ceil(totalRecords / numLimit),
                 totalRecords: totalRecords,
+                limit: numLimit
+            }
+        }); 
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+}); */
+
+app.get('/clavesalternas/filter', async (req, res) => {
+    const { SUCURSAL, familia, limit, offset } = req.query;
+    const cvePrecio = SUCURSAL ? SUCURSAL.toString() : '1';
+    
+    const numLimit = parseInt(limit) || 10;
+    const numOffset = parseInt(offset) || 0;
+    
+    let whereClauses = ["1=1"];
+    let params = [cvePrecio]; 
+
+    // Mapeo de campos dimensionales para filtros exactos
+    const dimensionalFields = { 
+        diam_int: 'T4.CAMPLIB1', 
+        diam_ext: 'T4.CAMPLIB2', 
+        altura: 'T4.CAMPLIB3', 
+        seccion: 'T4.CAMPLIB7' 
+    };
+
+    for (const key in dimensionalFields) {
+        const val = req.query[key];
+        if (val) {
+            const numVal = parseFloat(val.replace(',', '.'));
+            if (!isNaN(numVal)) {
+                // Buscamos coincidencia exacta numérica
+                const dbNum = `CAST(REPLACE(COALESCE(NULLIF(TRIM(${dimensionalFields[key]}), ''), '0'), ',', '.') AS NUMERIC(15, 4))`;
+                whereClauses.push(`ABS(${dbNum} - CAST(? AS NUMERIC(15, 4))) <= 0.001`);
+                params.push(numVal);
+            }
+        }
+    }
+
+    if (familia) {
+        whereClauses.push(`UPPER(TRIM(COALESCE(T4.CAMPLIB22, ''))) = UPPER(TRIM(?))`);
+        params.push(familia);
+    }
+
+    const whereString = `WHERE ${whereClauses.join(' AND ')}`;
+
+    try {
+        // 1. Conteo para paginación
+        const countSql = `SELECT COUNT(DISTINCT T1.CVE_ART) AS TOTAL FROM INVE02 T1 LEFT JOIN INVE_CLIB02 T4 ON T1.CVE_ART = T4.CVE_PROD ${whereString}`;
+        const countRes = await db.query(countSql, params.slice(1));
+        const totalRecords = countRes[0]?.TOTAL || 0;
+
+        // 2. Consulta de datos base (Sin MINVE02 para evitar lentitud)
+        const sql = `
+            SELECT FIRST ${numLimit} SKIP ${numOffset}
+                T1.CVE_ART, T1.DESCR, T1.UNI_MED, T1.FCH_ULTCOM, 
+                T1.ULT_COSTO AS COSTO_PROM, -- Renombrado solicitado
+                T1.LIN_PROD,
+                T4.CAMPLIB1 AS DIAM_INT, T4.CAMPLIB2 AS DIAM_EXT, T4.CAMPLIB3 AS ALTURA,
+                T4.CAMPLIB7 AS SECCION, T4.CAMPLIB13 AS PERFIL, 
+                T4.CAMPLIB15 AS CLA_SYR, T4.CAMPLIB16 AS CLA_LC,
+                T4.CAMPLIB17 AS SIST_MED, T4.CAMPLIB19 AS DESC_ECOMM, T4.CAMPLIB21 AS GENERO,
+                T4.CAMPLIB22 AS FAMILIA, T4.CAMPLIB28 AS COLOCACION,
+                COALESCE(MAX(T5.PRECIO), 0.00) AS PRECIO, 
+                COALESCE(MAX(CASE WHEN T6.CVE_ALM = 1 THEN T6.EXIST ELSE NULL END), 0) AS ALM_1_EXIST,
+                COALESCE(MAX(CASE WHEN T6.CVE_ALM = 3 THEN T6.EXIST ELSE NULL END), 0) AS ALM_3_EXIST,
+                COALESCE(MAX(CASE WHEN T6.CVE_ALM = 5 THEN T6.EXIST ELSE NULL END), 0) AS ALM_5_EXIST,
+                COALESCE(MAX(CASE WHEN T6.CVE_ALM = 6 THEN T6.EXIST ELSE NULL END), 0) AS ALM_6_EXIST,
+                COALESCE(MAX(CASE WHEN T6.CVE_ALM = 7 THEN T6.EXIST ELSE NULL END), 0) AS ALM_7_EXIST
+            FROM INVE02 T1
+            LEFT JOIN INVE_CLIB02 T4 ON T1.CVE_ART = T4.CVE_PROD
+            LEFT JOIN PRECIO_X_PROD02 T5 ON (T1.CVE_ART = T5.CVE_ART AND TRIM(T5.CVE_PRECIO) = CAST(? AS VARCHAR(10)))
+            LEFT JOIN MULT02 T6 ON T1.CVE_ART = T6.CVE_ART
+            ${whereString}
+            GROUP BY 1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18
+            ORDER BY T1.CVE_ART;
+        `;
+
+        let dataResult = await db.query(sql, params);
+
+        // 3. Enriquecer con el último costo y proveedor (MINVE02)
+        dataResult = await enrichWithUltimoCosto(dataResult);
+
+        // 4. Enriquecer con Almacén 10 (DB3)
+        if (dataResult.length > 0) {
+            const ids = dataResult.map(item => item.CVE_ART.trim());
+            const sql3 = `SELECT TRIM(CVE_ART) AS ART, EXIST FROM MULT03 WHERE CVE_ALM = 3 AND CVE_ART IN (${ids.map(() => '?').join(',')})`;
+            const res3 = await db3.query(sql3, ids);
+            const map3 = {};
+            res3.forEach(r => map3[r.ART] = r.EXIST);
+            dataResult = dataResult.map(item => ({ ...item, ALM_10_EXIST: map3[item.CVE_ART.trim()] || 0 }));
+        }
+
+        res.json({ 
+            data: processExistencias(dataResult),
+            pagination: {
+                currentPage: Math.floor(numOffset / numLimit) + 1,
+                totalPages: Math.ceil(totalRecords / numLimit),
+                totalRecords,
                 limit: numLimit
             }
         }); 
