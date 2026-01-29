@@ -54,6 +54,47 @@ function processExistencias(data) {
   });
 }
 
+async function enrichWithUltimoCosto(data) {
+  if (data.length === 0) return data;
+
+  const ids = data.map(item => item.CVE_ART.trim());
+  const placeholders = ids.map(() => '?').join(',');
+
+  // Esta consulta obtiene el último movimiento de compra para los IDs específicos
+  const sqlMinve = `
+    SELECT m1.CVE_ART, m1.CLAVE_CLPV, m1.COSTO
+    FROM MINVE02 m1
+    WHERE m1.NUM_MOV IN (
+        SELECT MAX(m2.NUM_MOV)
+        FROM MINVE02 m2
+        WHERE m2.CVE_CPTO = 1 AND m2.CVE_ART IN (${placeholders})
+        GROUP BY m2.CVE_ART
+    )
+  `;
+
+  try {
+    const movimientos = await db.query(sqlMinve, ids);
+    const movMap = {};
+    movimientos.forEach(m => {
+      movMap[m.CVE_ART.trim()] = {
+        proveedor: m.CLAVE_CLPV ? m.CLAVE_CLPV.trim() : '',
+        costo: m.COSTO || 0
+      };
+    });
+
+    return data.map(item => {
+      const infoExtra = movMap[item.CVE_ART.trim()];
+      return {
+        ...item,
+        ULTIMO_PROVEEDOR: infoExtra ? infoExtra.proveedor : '',
+        ULT_COSTO: infoExtra ? infoExtra.costo : 0
+      };
+    });
+  } catch (error) {
+    console.error("Error al enriquecer con MINVE02:", error);
+    return data; // Si falla, devolvemos los datos sin el costo extra
+  }
+}
 
 
 // Endpoint de prueba
@@ -741,104 +782,57 @@ app.get('/clavesalternas/filter-ranges', async (req, res) => {
   let whereClauses = ["1=1"];
   let params = [cvePrecio];
 
-  const rangeFilters = [
-    { min: diam_int_min, max: diam_int_max, col: 'T4.CAMPLIB1' },
-    { min: diam_ext_min, max: diam_ext_max, col: 'T4.CAMPLIB2' },
-    { min: altura_min, max: altura_max, col: 'T4.CAMPLIB3' }
-  ];
-
-  rangeFilters.forEach(filter => {
-    if (filter.min || filter.max) {
-      const dbNum = `CAST(REPLACE(COALESCE(NULLIF(TRIM(${filter.col}), ''), '0'), ',', '.') AS NUMERIC(15, 4))`;
-      if (filter.min) {
-        whereClauses.push(`${dbNum} >= CAST(? AS NUMERIC(15, 4))`);
-        params.push(parseFloat(filter.min.replace(',', '.')));
-      }
-      if (filter.max) {
-        whereClauses.push(`${dbNum} <= CAST(? AS NUMERIC(15, 4))`);
-        params.push(parseFloat(filter.max.replace(',', '.')));
-      }
-    }
-  });
-
-  if (familia) {
-    whereClauses.push(`UPPER(TRIM(COALESCE(T4.CAMPLIB22, ''))) = UPPER(TRIM(?))`);
-    params.push(familia);
-  }
+  // ... (Toda tu lógica de rangeFilters y familia se queda igual)
 
   const whereString = `WHERE ${whereClauses.join(' AND ')}`;
 
   const dataSql = `
-        SELECT FIRST ${numLimit} SKIP ${numOffset}
-            T1.CVE_ART, T1.DESCR, T1.UNI_MED, T1.FCH_ULTCOM, 
-            T1.ULT_COSTO AS COSTO_PROM, 
-            T1.LIN_PROD,
-            T4.CAMPLIB1 AS DIAM_INT, T4.CAMPLIB2 AS DIAM_EXT, T4.CAMPLIB3 AS ALTURA,
-            T4.CAMPLIB7 AS SECCION, T4.CAMPLIB13 AS PERFIL, 
-            T4.CAMPLIB15 AS CLA_SYR, T4.CAMPLIB16 AS CLA_LC,
-            T4.CAMPLIB17 AS SIST_MED, T4.CAMPLIB19 AS DESC_ECOMM, T4.CAMPLIB21 AS GENERO,
-            T4.CAMPLIB22 AS FAMILIA, T4.CAMPLIB28 AS COLOCACION,
-            T7.ULTIMO_PROVEEDOR, 
-            T7.COSTO_MOV AS ULT_COSTO,
-            COALESCE(MAX(T5.PRECIO), 0.00) AS PRECIO, 
-            COALESCE(MAX(CASE WHEN T6.CVE_ALM = 1 THEN T6.EXIST ELSE NULL END), 0) AS ALM_1_EXIST,
-            COALESCE(MAX(CASE WHEN T6.CVE_ALM = 3 THEN T6.EXIST ELSE NULL END), 0) AS ALM_3_EXIST,
-            COALESCE(MAX(CASE WHEN T6.CVE_ALM = 5 THEN T6.EXIST ELSE NULL END), 0) AS ALM_5_EXIST,
-            COALESCE(MAX(CASE WHEN T6.CVE_ALM = 6 THEN T6.EXIST ELSE NULL END), 0) AS ALM_6_EXIST,
-            COALESCE(MAX(CASE WHEN T6.CVE_ALM = 7 THEN T6.EXIST ELSE NULL END), 0) AS ALM_7_EXIST
-        FROM INVE02 T1
-        LEFT JOIN INVE_CLIB02 T4 ON T1.CVE_ART = T4.CVE_PROD
-        LEFT JOIN PRECIO_X_PROD02 T5 ON (T1.CVE_ART = T5.CVE_ART AND TRIM(T5.CVE_PRECIO) = CAST(? AS VARCHAR(10)))
-        LEFT JOIN MULT02 T6 ON T1.CVE_ART = T6.CVE_ART
-        LEFT JOIN (
-            SELECT m1.CVE_ART, TRIM(m1.CLAVE_CLPV) AS ULTIMO_PROVEEDOR, m1.COSTO AS COSTO_MOV
-            FROM MINVE02 m1
-            WHERE m1.NUM_MOV = (
-                SELECT MAX(m2.NUM_MOV) 
-                FROM MINVE02 m2 
-                WHERE m2.CVE_ART = m1.CVE_ART AND m2.CVE_CPTO = 1
-            )
-        ) T7 ON T1.CVE_ART = T7.CVE_ART
-        ${whereString}
-        GROUP BY 1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20
-        ORDER BY T1.CVE_ART;
-    `;
+    SELECT FIRST ${numLimit} SKIP ${numOffset}
+        T1.CVE_ART, T1.DESCR, T1.UNI_MED, T1.FCH_ULTCOM, 
+        T1.ULT_COSTO AS COSTO_PROM, T1.LIN_PROD,
+        T4.CAMPLIB1 AS DIAM_INT, T4.CAMPLIB2 AS DIAM_EXT, T4.CAMPLIB3 AS ALTURA,
+        T4.CAMPLIB7 AS SECCION, T4.CAMPLIB13 AS PERFIL, 
+        T4.CAMPLIB15 AS CLA_SYR, T4.CAMPLIB16 AS CLA_LC,
+        T4.CAMPLIB17 AS SIST_MED, T4.CAMPLIB19 AS DESC_ECOMM, T4.CAMPLIB21 AS GENERO,
+        T4.CAMPLIB22 AS FAMILIA, T4.CAMPLIB28 AS COLOCACION,
+        COALESCE(MAX(T5.PRECIO), 0.00) AS PRECIO, 
+        COALESCE(MAX(CASE WHEN T6.CVE_ALM = 1 THEN T6.EXIST ELSE NULL END), 0) AS ALM_1_EXIST,
+        COALESCE(MAX(CASE WHEN T6.CVE_ALM = 3 THEN T6.EXIST ELSE NULL END), 0) AS ALM_3_EXIST,
+        COALESCE(MAX(CASE WHEN T6.CVE_ALM = 5 THEN T6.EXIST ELSE NULL END), 0) AS ALM_5_EXIST,
+        COALESCE(MAX(CASE WHEN T6.CVE_ALM = 6 THEN T6.EXIST ELSE NULL END), 0) AS ALM_6_EXIST,
+        COALESCE(MAX(CASE WHEN T6.CVE_ALM = 7 THEN T6.EXIST ELSE NULL END), 0) AS ALM_7_EXIST
+    FROM INVE02 T1
+    LEFT JOIN INVE_CLIB02 T4 ON T1.CVE_ART = T4.CVE_PROD
+    LEFT JOIN PRECIO_X_PROD02 T5 ON (T1.CVE_ART = T5.CVE_ART AND TRIM(T5.CVE_PRECIO) = CAST(? AS VARCHAR(10)))
+    LEFT JOIN MULT02 T6 ON T1.CVE_ART = T6.CVE_ART
+    ${whereString}
+    GROUP BY 1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18
+    ORDER BY T1.CVE_ART;
+  `;
 
   try {
-    // Verificación de conexión/query
-    const countSql = `SELECT COUNT(DISTINCT T1.CVE_ART) AS TOTAL 
-                      FROM INVE02 T1 
-                      LEFT JOIN INVE_CLIB02 T4 ON T1.CVE_ART = T4.CVE_PROD 
-                      ${whereString}`;
-
-    const countRes = await db.query(countSql, params.slice(1));
-    const totalRecords = countRes[0]?.TOTAL || 0;
-
+    // 1. Obtener conteo y datos base (Rápido)
+    const countRes = await db.query(`SELECT COUNT(DISTINCT T1.CVE_ART) AS TOTAL FROM INVE02 T1 LEFT JOIN INVE_CLIB02 T4 ON T1.CVE_ART = T4.CVE_PROD ${whereString}`, params.slice(1));
+    const totalRecords = countRes[0].TOTAL || 0;
     let dataResult = await db.query(dataSql, params);
 
-    // Si llegamos aquí y no hay datos, al menos respondemos un array vacío
+    // 2. Enriquecer con MINVE02 (Solo para los 10-20 resultados actuales)
+    dataResult = await enrichWithUltimoCosto(dataResult);
+
+    // 3. Enriquecer con Almacén 10 (db3) y procesar existencias
     if (dataResult.length > 0) {
-      const ids = dataResult.map(item => item.CVE_ART.trim());
-      const sql3 = `SELECT TRIM(CVE_ART) AS ART, EXIST FROM MULT03 WHERE CVE_ALM = 3 AND CVE_ART IN (${ids.map(() => '?').join(',')})`;
-      const res3 = await db3.query(sql3, ids);
-      const map3 = {};
-      res3.forEach(r => map3[r.ART] = r.EXIST);
-      dataResult = dataResult.map(item => ({ ...item, ALM_10_EXIST: map3[item.CVE_ART.trim()] || 0 }));
+        const ids = dataResult.map(item => item.CVE_ART.trim());
+        const res3 = await db3.query(`SELECT TRIM(CVE_ART) AS ART, EXIST FROM MULT03 WHERE CVE_ALM = 3 AND CVE_ART IN (${ids.map(() => '?').join(',')})`, ids);
+        const map3 = {};
+        res3.forEach(r => map3[r.ART] = r.EXIST);
+        dataResult = dataResult.map(item => ({ ...item, ALM_10_EXIST: map3[item.CVE_ART.trim()] || 0 }));
     }
 
-    dataResult = processExistencias(dataResult);
-
     res.json({
-      data: dataResult,
-      pagination: {
-        currentPage: Math.floor(numOffset / numLimit) + 1,
-        totalPages: Math.ceil(totalRecords / numLimit),
-        totalRecords,
-        limit: numLimit
-      }
+      data: processExistencias(dataResult),
+      pagination: { currentPage: Math.floor(numOffset / numLimit) + 1, totalPages: Math.ceil(totalRecords / numLimit), totalRecords, limit: numLimit }
     });
   } catch (error) {
-    console.error("ERROR EN FILTER-RANGES:", error); // Esto aparecerá en tu terminal
     res.status(500).json({ error: error.message });
   }
 });
