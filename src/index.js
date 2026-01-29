@@ -55,57 +55,48 @@ function processExistencias(data) {
 }
 
 async function enrichWithUltimoCosto(data) {
-  if (data.length === 0) return data;
+    if (!data || data.length === 0) return data;
 
-  const ids = data.map(item => item.CVE_ART.trim());
-  // Filtramos IDs vacíos para evitar errores
-  const validIds = ids.filter(id => id.length > 0);
-  if (validIds.length === 0) return data;
+    // Solo tomamos los IDs de los 10 registros actuales
+    const ids = data.map(item => item.CVE_ART.trim());
+    const placeholders = ids.map(() => '?').join(',');
 
-  const placeholders = validIds.map(() => '?').join(',');
+    // Consultamos MINVE02 solo para esos 10 productos
+    const sqlMinve = `
+        SELECT CVE_ART, CLAVE_CLPV, COSTO, NUM_MOV
+        FROM MINVE02
+        WHERE CVE_CPTO = 1 AND CVE_ART IN (${placeholders})
+        ORDER BY NUM_MOV DESC
+    `;
 
-  /** * CAMBIO DE ESTRATEGIA: 
-   * Traemos todos los movimientos de compra recientes para estos IDs 
-   * y dejamos que Node.js encuentre el último. Esto es mil veces más rápido 
-   * que pedirle a Firebird que calcule el MAX por cada fila en un JOIN.
-   */
-  const sqlMinve = `
-    SELECT CVE_ART, CLAVE_CLPV, COSTO, NUM_MOV
-    FROM MINVE02
-    WHERE CVE_CPTO = 1 AND CVE_ART IN (${placeholders})
-    ORDER BY NUM_MOV DESC
-  `;
+    try {
+        const movimientos = await db.query(sqlMinve, ids);
+        
+        // Mapa para guardar solo el movimiento más reciente de cada artículo
+        const movMap = {};
+        movimientos.forEach(m => {
+            const art = m.CVE_ART.trim();
+            if (!movMap[art]) {
+                movMap[art] = {
+                    proveedor: m.CLAVE_CLPV ? m.CLAVE_CLPV.trim() : '',
+                    costo: m.COSTO || 0
+                };
+            }
+        });
 
-  try {
-    const todosLosMovimientos = await db.query(sqlMinve, validIds);
-    
-    // Como ordenamos por NUM_MOV DESC, la primera vez que veamos un CVE_ART en el loop, 
-    // será el movimiento más reciente.
-    const movMap = {};
-    todosLosMovimientos.forEach(m => {
-      const art = m.CVE_ART.trim();
-      if (!movMap[art]) {
-        movMap[art] = {
-          proveedor: m.CLAVE_CLPV ? m.CLAVE_CLPV.trim() : '',
-          costo: m.COSTO || 0
-        };
-      }
-    });
-
-    return data.map(item => {
-      const artKey = item.CVE_ART.trim();
-      const infoExtra = movMap[artKey];
-      return {
-        ...item,
-        ULTIMO_PROVEEDOR: infoExtra ? infoExtra.proveedor : 'N/A',
-        ULT_COSTO: infoExtra ? infoExtra.costo : 0
-      };
-    });
-  } catch (error) {
-    console.error("Error crítico en enriquecimiento MINVE02:", error.message);
-    // Devolvemos los datos originales para no romper la respuesta de la API
-    return data.map(item => ({ ...item, ULTIMO_PROVEEDOR: 'Error', ULT_COSTO: 0 }));
-  }
+        // Inyectamos los datos en el array original de 10 registros
+        return data.map(item => {
+            const info = movMap[item.CVE_ART.trim()];
+            return {
+                ...item,
+                ULTIMO_PROVEEDOR: info ? info.proveedor : '',
+                ULT_COSTO: info ? info.costo : 0
+            };
+        });
+    } catch (error) {
+        console.error("Error en MINVE02:", error);
+        return data.map(item => ({ ...item, ULTIMO_PROVEEDOR: '', ULT_COSTO: 0 }));
+    }
 }
 
 
@@ -786,67 +777,76 @@ app.get('/clavesalternas/search2', async (req, res) => {
 }); */
 
 app.get('/clavesalternas/filter-ranges', async (req, res) => {
-  const { SUCURSAL, familia, diam_int_min, diam_int_max, diam_ext_min, diam_ext_max, altura_min, altura_max, limit, offset } = req.query;
-  const cvePrecio = SUCURSAL ? SUCURSAL.toString() : '1';
-  const numLimit = parseInt(limit) || 10;
-  const numOffset = parseInt(offset) || 0;
+    const { SUCURSAL, familia, diam_int_min, diam_int_max, diam_ext_min, diam_ext_max, altura_min, altura_max, limit, offset } = req.query;
+    const cvePrecio = SUCURSAL ? SUCURSAL.toString() : '1';
+    const numLimit = parseInt(limit) || 10;
+    const numOffset = parseInt(offset) || 0;
 
-  let whereClauses = ["1=1"];
-  let params = [cvePrecio];
+    let whereClauses = ["1=1"];
+    let params = [cvePrecio];
 
-  // ... (Toda tu lógica de rangeFilters y familia se queda igual)
+    // ... (Tu lógica de rangeFilters y familia se mantiene igual)
 
-  const whereString = `WHERE ${whereClauses.join(' AND ')}`;
+    const whereString = `WHERE ${whereClauses.join(' AND ')}`;
 
-  const dataSql = `
-    SELECT FIRST ${numLimit} SKIP ${numOffset}
-        T1.CVE_ART, T1.DESCR, T1.UNI_MED, T1.FCH_ULTCOM, 
-        T1.ULT_COSTO AS COSTO_PROM, T1.LIN_PROD,
-        T4.CAMPLIB1 AS DIAM_INT, T4.CAMPLIB2 AS DIAM_EXT, T4.CAMPLIB3 AS ALTURA,
-        T4.CAMPLIB7 AS SECCION, T4.CAMPLIB13 AS PERFIL, 
-        T4.CAMPLIB15 AS CLA_SYR, T4.CAMPLIB16 AS CLA_LC,
-        T4.CAMPLIB17 AS SIST_MED, T4.CAMPLIB19 AS DESC_ECOMM, T4.CAMPLIB21 AS GENERO,
-        T4.CAMPLIB22 AS FAMILIA, T4.CAMPLIB28 AS COLOCACION,
-        COALESCE(MAX(T5.PRECIO), 0.00) AS PRECIO, 
-        COALESCE(MAX(CASE WHEN T6.CVE_ALM = 1 THEN T6.EXIST ELSE NULL END), 0) AS ALM_1_EXIST,
-        COALESCE(MAX(CASE WHEN T6.CVE_ALM = 3 THEN T6.EXIST ELSE NULL END), 0) AS ALM_3_EXIST,
-        COALESCE(MAX(CASE WHEN T6.CVE_ALM = 5 THEN T6.EXIST ELSE NULL END), 0) AS ALM_5_EXIST,
-        COALESCE(MAX(CASE WHEN T6.CVE_ALM = 6 THEN T6.EXIST ELSE NULL END), 0) AS ALM_6_EXIST,
-        COALESCE(MAX(CASE WHEN T6.CVE_ALM = 7 THEN T6.EXIST ELSE NULL END), 0) AS ALM_7_EXIST
-    FROM INVE02 T1
-    LEFT JOIN INVE_CLIB02 T4 ON T1.CVE_ART = T4.CVE_PROD
-    LEFT JOIN PRECIO_X_PROD02 T5 ON (T1.CVE_ART = T5.CVE_ART AND TRIM(T5.CVE_PRECIO) = CAST(? AS VARCHAR(10)))
-    LEFT JOIN MULT02 T6 ON T1.CVE_ART = T6.CVE_ART
-    ${whereString}
-    GROUP BY 1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18
-    ORDER BY T1.CVE_ART;
-  `;
+    // CONSULTA 1: Conteo (Necesaria para paginación)
+    const countSql = `SELECT COUNT(DISTINCT T1.CVE_ART) AS TOTAL FROM INVE02 T1 LEFT JOIN INVE_CLIB02 T4 ON T1.CVE_ART = T4.CVE_PROD ${whereString}`;
 
-  try {
-    // 1. Obtener conteo y datos base (Rápido)
-    const countRes = await db.query(`SELECT COUNT(DISTINCT T1.CVE_ART) AS TOTAL FROM INVE02 T1 LEFT JOIN INVE_CLIB02 T4 ON T1.CVE_ART = T4.CVE_PROD ${whereString}`, params.slice(1));
-    const totalRecords = countRes[0].TOTAL || 0;
-    let dataResult = await db.query(dataSql, params);
+    // CONSULTA 2: Datos Base (Solo 10 registros)
+    const dataSql = `
+        SELECT FIRST ${numLimit} SKIP ${numOffset}
+            T1.CVE_ART, T1.DESCR, T1.UNI_MED, T1.FCH_ULTCOM, 
+            T1.ULT_COSTO AS COSTO_PROM, T1.LIN_PROD,
+            T4.CAMPLIB1 AS DIAM_INT, T4.CAMPLIB2 AS DIAM_EXT, T4.CAMPLIB3 AS ALTURA,
+            T4.CAMPLIB7 AS SECCION, T4.CAMPLIB13 AS PERFIL, 
+            T4.CAMPLIB15 AS CLA_SYR, T4.CAMPLIB16 AS CLA_LC,
+            T4.CAMPLIB17 AS SIST_MED, T4.CAMPLIB19 AS DESC_ECOMM, T4.CAMPLIB21 AS GENERO,
+            T4.CAMPLIB22 AS FAMILIA, T4.CAMPLIB28 AS COLOCACION,
+            COALESCE(MAX(T5.PRECIO), 0.00) AS PRECIO, 
+            COALESCE(MAX(CASE WHEN T6.CVE_ALM = 1 THEN T6.EXIST ELSE NULL END), 0) AS ALM_1_EXIST,
+            COALESCE(MAX(CASE WHEN T6.CVE_ALM = 3 THEN T6.EXIST ELSE NULL END), 0) AS ALM_3_EXIST,
+            COALESCE(MAX(CASE WHEN T6.CVE_ALM = 5 THEN T6.EXIST ELSE NULL END), 0) AS ALM_5_EXIST,
+            COALESCE(MAX(CASE WHEN T6.CVE_ALM = 6 THEN T6.EXIST ELSE NULL END), 0) AS ALM_6_EXIST,
+            COALESCE(MAX(CASE WHEN T6.CVE_ALM = 7 THEN T6.EXIST ELSE NULL END), 0) AS ALM_7_EXIST
+        FROM INVE02 T1
+        LEFT JOIN INVE_CLIB02 T4 ON T1.CVE_ART = T4.CVE_PROD
+        LEFT JOIN PRECIO_X_PROD02 T5 ON (T1.CVE_ART = T5.CVE_ART AND TRIM(T5.CVE_PRECIO) = CAST(? AS VARCHAR(10)))
+        LEFT JOIN MULT02 T6 ON T1.CVE_ART = T6.CVE_ART
+        ${whereString}
+        GROUP BY 1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18
+        ORDER BY T1.CVE_ART;
+    `;
 
-    // 2. Enriquecer con MINVE02 (Solo para los 10-20 resultados actuales)
-    dataResult = await enrichWithUltimoCosto(dataResult);
+    try {
+        const countRes = await db.query(countSql, params.slice(1));
+        const totalRecords = countRes[0].TOTAL || 0;
 
-    // 3. Enriquecer con Almacén 10 (db3) y procesar existencias
-    if (dataResult.length > 0) {
-        const ids = dataResult.map(item => item.CVE_ART.trim());
-        const res3 = await db3.query(`SELECT TRIM(CVE_ART) AS ART, EXIST FROM MULT03 WHERE CVE_ALM = 3 AND CVE_ART IN (${ids.map(() => '?').join(',')})`, ids);
-        const map3 = {};
-        res3.forEach(r => map3[r.ART] = r.EXIST);
-        dataResult = dataResult.map(item => ({ ...item, ALM_10_EXIST: map3[item.CVE_ART.trim()] || 0 }));
+        let dataResult = await db.query(dataSql, params);
+
+        // PASO CLAVE: Enriquecer SOLO los 10 resultados obtenidos
+        dataResult = await enrichWithUltimoCosto(dataResult);
+
+        // Enriquecer con DB3 (Almacén 10)
+        if (dataResult.length > 0) {
+            const ids = dataResult.map(item => item.CVE_ART.trim());
+            const res3 = await db3.query(`SELECT TRIM(CVE_ART) AS ART, EXIST FROM MULT03 WHERE CVE_ALM = 3 AND CVE_ART IN (${ids.map(() => '?').join(',')})`, ids);
+            const map3 = {};
+            res3.forEach(r => map3[r.ART] = r.EXIST);
+            dataResult = dataResult.map(item => ({ ...item, ALM_10_EXIST: map3[item.CVE_ART.trim()] || 0 }));
+        }
+
+        res.json({
+            data: processExistencias(dataResult),
+            pagination: {
+                currentPage: Math.floor(numOffset / numLimit) + 1,
+                totalPages: Math.ceil(totalRecords / numLimit),
+                totalRecords,
+                limit: numLimit
+            }
+        });
+    } catch (error) {
+        res.status(500).json({ error: error.message });
     }
-
-    res.json({
-      data: processExistencias(dataResult),
-      pagination: { currentPage: Math.floor(numOffset / numLimit) + 1, totalPages: Math.ceil(totalRecords / numLimit), totalRecords, limit: numLimit }
-    });
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
 });
 
 app.get('/clavesalternas/filter', async (req, res) => {
