@@ -58,41 +58,53 @@ async function enrichWithUltimoCosto(data) {
   if (data.length === 0) return data;
 
   const ids = data.map(item => item.CVE_ART.trim());
-  const placeholders = ids.map(() => '?').join(',');
+  // Filtramos IDs vacíos para evitar errores
+  const validIds = ids.filter(id => id.length > 0);
+  if (validIds.length === 0) return data;
 
-  // Esta consulta obtiene el último movimiento de compra para los IDs específicos
+  const placeholders = validIds.map(() => '?').join(',');
+
+  /** * CAMBIO DE ESTRATEGIA: 
+   * Traemos todos los movimientos de compra recientes para estos IDs 
+   * y dejamos que Node.js encuentre el último. Esto es mil veces más rápido 
+   * que pedirle a Firebird que calcule el MAX por cada fila en un JOIN.
+   */
   const sqlMinve = `
-    SELECT m1.CVE_ART, m1.CLAVE_CLPV, m1.COSTO
-    FROM MINVE02 m1
-    WHERE m1.NUM_MOV IN (
-        SELECT MAX(m2.NUM_MOV)
-        FROM MINVE02 m2
-        WHERE m2.CVE_CPTO = 1 AND m2.CVE_ART IN (${placeholders})
-        GROUP BY m2.CVE_ART
-    )
+    SELECT CVE_ART, CLAVE_CLPV, COSTO, NUM_MOV
+    FROM MINVE02
+    WHERE CVE_CPTO = 1 AND CVE_ART IN (${placeholders})
+    ORDER BY NUM_MOV DESC
   `;
 
   try {
-    const movimientos = await db.query(sqlMinve, ids);
+    const todosLosMovimientos = await db.query(sqlMinve, validIds);
+    
+    // Como ordenamos por NUM_MOV DESC, la primera vez que veamos un CVE_ART en el loop, 
+    // será el movimiento más reciente.
     const movMap = {};
-    movimientos.forEach(m => {
-      movMap[m.CVE_ART.trim()] = {
-        proveedor: m.CLAVE_CLPV ? m.CLAVE_CLPV.trim() : '',
-        costo: m.COSTO || 0
-      };
+    todosLosMovimientos.forEach(m => {
+      const art = m.CVE_ART.trim();
+      if (!movMap[art]) {
+        movMap[art] = {
+          proveedor: m.CLAVE_CLPV ? m.CLAVE_CLPV.trim() : '',
+          costo: m.COSTO || 0
+        };
+      }
     });
 
     return data.map(item => {
-      const infoExtra = movMap[item.CVE_ART.trim()];
+      const artKey = item.CVE_ART.trim();
+      const infoExtra = movMap[artKey];
       return {
         ...item,
-        ULTIMO_PROVEEDOR: infoExtra ? infoExtra.proveedor : '',
+        ULTIMO_PROVEEDOR: infoExtra ? infoExtra.proveedor : 'N/A',
         ULT_COSTO: infoExtra ? infoExtra.costo : 0
       };
     });
   } catch (error) {
-    console.error("Error al enriquecer con MINVE02:", error);
-    return data; // Si falla, devolvemos los datos sin el costo extra
+    console.error("Error crítico en enriquecimiento MINVE02:", error.message);
+    // Devolvemos los datos originales para no romper la respuesta de la API
+    return data.map(item => ({ ...item, ULTIMO_PROVEEDOR: 'Error', ULT_COSTO: 0 }));
   }
 }
 
