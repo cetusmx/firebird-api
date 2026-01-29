@@ -778,6 +778,7 @@ app.get('/clavesalternas/search2', async (req, res) => {
 
 app.get('/clavesalternas/filter-ranges', async (req, res) => {
     const { SUCURSAL, familia, diam_int_min, diam_int_max, diam_ext_min, diam_ext_max, altura_min, altura_max, limit, offset } = req.query;
+    
     const cvePrecio = SUCURSAL ? SUCURSAL.toString() : '1';
     const numLimit = parseInt(limit) || 10;
     const numOffset = parseInt(offset) || 0;
@@ -785,14 +786,44 @@ app.get('/clavesalternas/filter-ranges', async (req, res) => {
     let whereClauses = ["1=1"];
     let params = [cvePrecio];
 
-    // ... (Tu lógica de rangeFilters y familia se mantiene igual)
+    // Filtros de rangos
+    const rangeFilters = [
+        { min: diam_int_min, max: diam_int_max, col: 'T4.CAMPLIB1' },
+        { min: diam_ext_min, max: diam_ext_max, col: 'T4.CAMPLIB2' },
+        { min: altura_min, max: altura_max, col: 'T4.CAMPLIB3' }
+    ];
+
+    rangeFilters.forEach(filter => {
+        if (filter.min || filter.max) {
+            const dbNum = `CAST(REPLACE(COALESCE(NULLIF(TRIM(${filter.col}), ''), '0'), ',', '.') AS NUMERIC(15, 4))`;
+            if (filter.min) {
+                whereClauses.push(`${dbNum} >= CAST(? AS NUMERIC(15, 4))`);
+                params.push(parseFloat(filter.min.replace(',', '.')));
+            }
+            if (filter.max) {
+                whereClauses.push(`${dbNum} <= CAST(? AS NUMERIC(15, 4))`);
+                params.push(parseFloat(filter.max.replace(',', '.')));
+            }
+        }
+    });
+
+    if (familia) {
+        whereClauses.push(`UPPER(TRIM(COALESCE(T4.CAMPLIB22, ''))) = UPPER(TRIM(?))`);
+        params.push(familia);
+    }
 
     const whereString = `WHERE ${whereClauses.join(' AND ')}`;
 
-    // CONSULTA 1: Conteo (Necesaria para paginación)
-    const countSql = `SELECT COUNT(DISTINCT T1.CVE_ART) AS TOTAL FROM INVE02 T1 LEFT JOIN INVE_CLIB02 T4 ON T1.CVE_ART = T4.CVE_PROD ${whereString}`;
+    // CONSULTA 1: Total de registros para la paginación
+    const countSql = `
+        SELECT COUNT(DISTINCT T1.CVE_ART) AS TOTAL 
+        FROM INVE02 T1 
+        LEFT JOIN INVE_CLIB02 T4 ON T1.CVE_ART = T4.CVE_PROD 
+        ${whereString}
+    `;
 
-    // CONSULTA 2: Datos Base (Solo 10 registros)
+    // CONSULTA 2: Datos base (Solo los 10 registros de la página actual)
+    // IMPORTANTE: Aquí usamos dataSql y FIRST/SKIP
     const dataSql = `
         SELECT FIRST ${numLimit} SKIP ${numOffset}
             T1.CVE_ART, T1.DESCR, T1.UNI_MED, T1.FCH_ULTCOM, 
@@ -818,18 +849,21 @@ app.get('/clavesalternas/filter-ranges', async (req, res) => {
     `;
 
     try {
+        // Ejecutamos el conteo
         const countRes = await db.query(countSql, params.slice(1));
-        const totalRecords = countRes[0].TOTAL || 0;
+        const totalRecords = countRes[0]?.TOTAL || 0;
 
+        // EJECUTAMOS dataSql (Asegúrate de que sea dataSql y no sql)
         let dataResult = await db.query(dataSql, params);
 
-        // PASO CLAVE: Enriquecer SOLO los 10 resultados obtenidos
+        // PASO 3: Enriquecer con MINVE02 (Solo los registros de la página)
         dataResult = await enrichWithUltimoCosto(dataResult);
 
-        // Enriquecer con DB3 (Almacén 10)
+        // PASO 4: Enriquecer con Almacén 10 (DB3)
         if (dataResult.length > 0) {
             const ids = dataResult.map(item => item.CVE_ART.trim());
-            const res3 = await db3.query(`SELECT TRIM(CVE_ART) AS ART, EXIST FROM MULT03 WHERE CVE_ALM = 3 AND CVE_ART IN (${ids.map(() => '?').join(',')})`, ids);
+            const sql3 = `SELECT TRIM(CVE_ART) AS ART, EXIST FROM MULT03 WHERE CVE_ALM = 3 AND CVE_ART IN (${ids.map(() => '?').join(',')})`;
+            const res3 = await db3.query(sql3, ids);
             const map3 = {};
             res3.forEach(r => map3[r.ART] = r.EXIST);
             dataResult = dataResult.map(item => ({ ...item, ALM_10_EXIST: map3[item.CVE_ART.trim()] || 0 }));
@@ -845,6 +879,7 @@ app.get('/clavesalternas/filter-ranges', async (req, res) => {
             }
         });
     } catch (error) {
+        console.error("Error en filter-ranges:", error);
         res.status(500).json({ error: error.message });
     }
 });
