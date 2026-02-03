@@ -899,6 +899,7 @@ app.get('/clavesalternas/search2', async (req, res) => {
 
 app.get('/clavesalternas/filter-ranges', async (req, res) => {
   const { lista_precios, SUCURSAL, familia, diam_int_min, diam_int_max, diam_ext_min, diam_ext_max, altura_min, altura_max, limit, offset } = req.query;
+  console.log(req.query);
   const numLimit = parseInt(limit) || 10;
   const numOffset = parseInt(offset) || 0;
 
