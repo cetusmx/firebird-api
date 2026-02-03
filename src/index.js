@@ -104,6 +104,7 @@ async function enrichWithUltimoCosto(data) {
  * y la lista_precios solicitada.
  */
 async function enrichWithPrecios(data, sucursal, listaPrecios) {
+  console.log('sucu: ', sucursal, 'lista: ', listaPrecios);
   if (!data || data.length === 0) return data;
   const ids = data.map(item => item.CVE_ART.trim());
   const placeholders = ids.map(() => '?').join(',');
