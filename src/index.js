@@ -898,15 +898,28 @@ app.get('/clavesalternas/search2', async (req, res) => {
 }); */
 
 app.get('/clavesalternas/filter-ranges', async (req, res) => {
-  const { lista_precios, SUCURSAL, familia, diam_int_min, diam_int_max, diam_ext_min, diam_ext_max, altura_min, altura_max, limit, offset } = req.query;
-  console.log(req.query);
+  // Extraemos los datos asegurándonos de capturar lista_precios
+  const { 
+    lista_precios, 
+    SUCURSAL, 
+    familia, 
+    diam_int_min, 
+    diam_int_max, 
+    diam_ext_min, 
+    diam_ext_max, 
+    altura_min, 
+    altura_max, 
+    limit, 
+    offset 
+  } = req.query;
+
   const numLimit = parseInt(limit) || 10;
   const numOffset = parseInt(offset) || 0;
 
   let whereClauses = ["1=1"];
-  let params = []; // LIMPIEZA: Ya no iniciamos con cvePrecio
+  let params = []; // Limpio de IDs de precios
 
-  // Filtros de rangos
+  // Filtros de rangos dimensionales
   const rangeFilters = [
     { min: diam_int_min, max: diam_int_max, col: 'T4.CAMPLIB1' },
     { min: diam_ext_min, max: diam_ext_max, col: 'T4.CAMPLIB2' },
@@ -935,12 +948,17 @@ app.get('/clavesalternas/filter-ranges', async (req, res) => {
   const whereString = `WHERE ${whereClauses.join(' AND ')}`;
 
   try {
-    // 1. Conteo (params ya no requiere .slice)
-    const countSql = `SELECT COUNT(DISTINCT T1.CVE_ART) AS TOTAL FROM INVE02 T1 LEFT JOIN INVE_CLIB02 T4 ON T1.CVE_ART = T4.CVE_PROD ${whereString}`;
+    // 1. Conteo para paginación
+    const countSql = `
+      SELECT COUNT(DISTINCT T1.CVE_ART) AS TOTAL 
+      FROM INVE02 T1 
+      LEFT JOIN INVE_CLIB02 T4 ON T1.CVE_ART = T4.CVE_PROD 
+      ${whereString}
+    `;
     const countRes = await db.query(countSql, params);
     const totalRecords = countRes[0]?.TOTAL || 0;
 
-    // 2. Consulta de datos (ELIMINADO JOIN T5 y ALM_3_EXIST)
+    // 2. Consulta de datos base (Sin Precios y sin Existencia de Sucursal 3)
     const dataSql = `
       SELECT FIRST ${numLimit} SKIP ${numOffset}
           T1.CVE_ART, T1.DESCR, T1.UNI_MED, T1.FCH_ULTCOM, 
@@ -964,11 +982,14 @@ app.get('/clavesalternas/filter-ranges', async (req, res) => {
 
     let dataResult = await db.query(dataSql, params);
 
-    // 3. Enriquecer con precios (Ruteo DB2/DB3)
+    // 3. Enriquecimiento Dinámico
+    // Precios (Ruteo DB2/DB3 según SUCURSAL)
     dataResult = await enrichWithPrecios(dataResult, SUCURSAL, lista_precios);
-
-    // 4. Enriquecer con costo y existencia Almacén 10
+    
+    // Último Costo y Proveedor
     dataResult = await enrichWithUltimoCosto(dataResult);
+
+    // Existencia Almacén 10 (DB3 - Almacén 3)
     if (dataResult.length > 0) {
       const ids = dataResult.map(item => item.CVE_ART.trim());
       const sql3 = `SELECT TRIM(CVE_ART) AS ART, EXIST FROM MULT03 WHERE CVE_ALM = 3 AND CVE_ART IN (${ids.map(() => '?').join(',')})`;
@@ -988,6 +1009,7 @@ app.get('/clavesalternas/filter-ranges', async (req, res) => {
       }
     });
   } catch (error) {
+    console.error("Error en filter-ranges:", error);
     res.status(500).json({ error: error.message });
   }
 });
@@ -998,9 +1020,14 @@ app.get('/clavesalternas/filter', async (req, res) => {
   const numOffset = parseInt(offset) || 0;
 
   let whereClauses = ["1=1"];
-  let params = []; // LIMPIEZA: Ya no iniciamos con cvePrecio
+  let params = [];
 
-  const dimensionalFields = { diam_int: 'T4.CAMPLIB1', diam_ext: 'T4.CAMPLIB2', altura: 'T4.CAMPLIB3', seccion: 'T4.CAMPLIB7' };
+  const dimensionalFields = {
+    diam_int: 'T4.CAMPLIB1',
+    diam_ext: 'T4.CAMPLIB2',
+    altura: 'T4.CAMPLIB3',
+    seccion: 'T4.CAMPLIB7'
+  };
 
   for (const key in dimensionalFields) {
     const val = req.query[key];
@@ -1049,11 +1076,10 @@ app.get('/clavesalternas/filter', async (req, res) => {
 
     let dataResult = await db.query(sql, params);
 
-    // Enriquecer con precios (Ruteo DB2/DB3)
+    // Enriquecimiento
     dataResult = await enrichWithPrecios(dataResult, SUCURSAL, lista_precios);
-
-    // Enriquecer con el resto de datos
     dataResult = await enrichWithUltimoCosto(dataResult);
+
     if (dataResult.length > 0) {
       const ids = dataResult.map(item => item.CVE_ART.trim());
       const sql3 = `SELECT TRIM(CVE_ART) AS ART, EXIST FROM MULT03 WHERE CVE_ALM = 3 AND CVE_ART IN (${ids.map(() => '?').join(',')})`;
@@ -1073,6 +1099,7 @@ app.get('/clavesalternas/filter', async (req, res) => {
       }
     });
   } catch (error) {
+    console.error("Error en filter:", error);
     res.status(500).json({ error: error.message });
   }
 });
