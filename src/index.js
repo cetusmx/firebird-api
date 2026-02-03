@@ -107,7 +107,7 @@ async function enrichWithPrecios(data, sucursal, listaPrecios) {
   if (!data || data.length === 0) return data;
   const ids = data.map(item => item.CVE_ART.trim());
   const placeholders = ids.map(() => '?').join(',');
-  const cveLista = listaPrecios ? listaPrecios.toString() : '1';
+  const cveLista = listaPrecios ? listaPrecios.toString() : '4';
 
   // Usamos toString() para que '3' == 3
   const esSucursal3 = sucursal && sucursal.toString() === '3';
