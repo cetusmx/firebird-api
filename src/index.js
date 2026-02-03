@@ -108,32 +108,40 @@ async function enrichWithPrecios(data, sucursal, listaPrecios) {
 
   const ids = data.map(item => item.CVE_ART.trim());
   const placeholders = ids.map(() => '?').join(',');
-  const cveLista = listaPrecios ? listaPrecios.toString() : '1';
+  
+  // 1. Aseguramos que listaPrecios sea un string y no esté vacío
+  const cveLista = (listaPrecios && listaPrecios.toString().trim() !== '') 
+                   ? listaPrecios.toString().trim() 
+                   : '1';
 
-  // Ruteo: Sucursal 3 va a db3 (PRECIO_X_PROD03). 1, 5, 6 o 7 van a db (PRECIO_X_PROD02).
-  const esSucursal3 = sucursal === '3';
+  // 2. CORRECCIÓN: Convertimos sucursal a string para la comparación
+  // Así, tanto 3 como '3' activarán la conexión db3
+  const esSucursal3 = sucursal && sucursal.toString().trim() === '3';
+  
   const connection = esSucursal3 ? db3 : db;
   const table = esSucursal3 ? 'PRECIO_X_PROD03' : 'PRECIO_X_PROD02';
 
+  // 3. Agregamos TRIM al parámetro en el WHERE para mayor seguridad
   const sql = `
     SELECT TRIM(CVE_ART) AS ART, PRECIO 
     FROM ${table} 
-    WHERE TRIM(CVE_PRECIO) = CAST(? AS VARCHAR(10)) 
+    WHERE TRIM(CVE_PRECIO) = TRIM(CAST(? AS VARCHAR(10))) 
     AND CVE_ART IN (${placeholders})
   `;
 
   try {
     const results = await connection.query(sql, [cveLista, ...ids]);
     const priceMap = {};
-    results.forEach(r => { priceMap[r.ART] = r.PRECIO; });
+    results.forEach(r => { 
+        priceMap[r.ART] = r.PRECIO; 
+    });
 
     return data.map(item => ({
       ...item,
-      PRECIO: priceMap[item.CVE_ART.trim()] || 0.00
+      PRECIO: priceMap[item.CVE_ART.trim()] !== undefined ? priceMap[item.CVE_ART.trim()] : 0.00
     }));
   } catch (error) {
-    console.error(`Error en enrichWithPrecios (${table}):`, error.message);
-    // En caso de error, devolvemos 0 para no romper la respuesta
+    console.error(`Error en enrichWithPrecios (${table}) para lista ${cveLista}:`, error.message);
     return data.map(item => ({ ...item, PRECIO: 0.00 }));
   }
 }
