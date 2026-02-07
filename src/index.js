@@ -943,9 +943,16 @@ app.get('/clavesalternas/catalogo', async (req, res) => {
   const numLimit = parseInt(limit) || 10;
   const numOffset = parseInt(offset) || 0;
 
-  // Sin filtros adicionales, se mantiene la base 1=1
-  let whereClauses = ["1=1"];
-  let params = [];
+  // Determinar la tabla de precios según la sucursal para el filtro
+  const priceTable = (SUCURSAL && SUCURSAL.toString() === '3') ? 'PRECIO_X_PROD03' : 'PRECIO_X_PROD02';
+  const cveLista = lista_precios ? lista_precios.toString() : '4';
+
+  // Filtro: Debe tener Costo Promedio > 0 O existir un precio > 0 en la lista seleccionada
+  let whereClauses = [
+    `(T1.ULT_COSTO > 0 OR EXISTS (SELECT 1 FROM ${priceTable} P WHERE P.CVE_ART = T1.CVE_ART AND TRIM(P.CVE_PRECIO) = CAST(? AS VARCHAR(10)) AND P.PRECIO > 0))`
+  ];
+  let params = [cveLista]; 
+  
   const whereString = `WHERE ${whereClauses.join(' AND ')}`;
 
   try {
@@ -964,6 +971,7 @@ app.get('/clavesalternas/catalogo', async (req, res) => {
           T4.CAMPLIB15 AS CLA_SYR, T4.CAMPLIB16 AS CLA_LC,
           T4.CAMPLIB17 AS SIST_MED, T4.CAMPLIB19 AS DESC_ECOMM, T4.CAMPLIB21 AS GENERO,
           T4.CAMPLIB22 AS FAMILIA, T4.CAMPLIB28 AS COLOCACION,
+          T4.CAMPLIB24 AS CAT_ECOMM, -- <--- Nuevo campo solicitado
           COALESCE(MAX(CASE WHEN T6.CVE_ALM = 1 THEN T6.EXIST ELSE NULL END), 0) AS ALM_1_EXIST,
           COALESCE(MAX(CASE WHEN T6.CVE_ALM = 5 THEN T6.EXIST ELSE NULL END), 0) AS ALM_5_EXIST,
           COALESCE(MAX(CASE WHEN T6.CVE_ALM = 6 THEN T6.EXIST ELSE NULL END), 0) AS ALM_6_EXIST,
@@ -972,13 +980,13 @@ app.get('/clavesalternas/catalogo', async (req, res) => {
       LEFT JOIN INVE_CLIB02 T4 ON T1.CVE_ART = T4.CVE_PROD
       LEFT JOIN MULT02 T6 ON T1.CVE_ART = T6.CVE_ART
       ${whereString}
-      GROUP BY 1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18
+      GROUP BY 1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19 -- Agregado el 19 por CAT_ECOMM
       ORDER BY T1.CVE_ART;
     `;
 
     let dataResult = await db.query(sql, params);
 
-    // 3. Enriquecimiento de datos (Precios, Costos y Existencia Empresa 3)
+    // 3. Enriquecimiento de datos
     dataResult = await enrichWithPrecios(dataResult, SUCURSAL, lista_precios);
     dataResult = await enrichWithUltimoCosto(dataResult);
 
@@ -1002,6 +1010,56 @@ app.get('/clavesalternas/catalogo', async (req, res) => {
     });
   } catch (error) {
     console.error("Error en catalogo:", error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.get('/clavesalternas/catalogo/:clave', async (req, res) => {
+  const { clave } = req.params;
+  const { lista_precios, SUCURSAL } = req.query;
+
+  try {
+    const sql = `
+      SELECT
+          T1.CVE_ART, T1.DESCR, T1.UNI_MED, T1.FCH_ULTCOM, 
+          T1.ULT_COSTO AS COSTO_PROM, T1.LIN_PROD,
+          T4.CAMPLIB1 AS DIAM_INT, T4.CAMPLIB2 AS DIAM_EXT, T4.CAMPLIB3 AS ALTURA,
+          T4.CAMPLIB7 AS SECCION, T4.CAMPLIB13 AS PERFIL, 
+          T4.CAMPLIB15 AS CLA_SYR, T4.CAMPLIB16 AS CLA_LC,
+          T4.CAMPLIB17 AS SIST_MED, T4.CAMPLIB19 AS DESC_ECOMM, T4.CAMPLIB21 AS GENERO,
+          T4.CAMPLIB22 AS FAMILIA, T4.CAMPLIB28 AS COLOCACION,
+          T4.CAMPLIB24 AS CAT_ECOMM, -- <--- Nuevo campo solicitado
+          COALESCE(MAX(CASE WHEN T6.CVE_ALM = 1 THEN T6.EXIST ELSE NULL END), 0) AS ALM_1_EXIST,
+          COALESCE(MAX(CASE WHEN T6.CVE_ALM = 5 THEN T6.EXIST ELSE NULL END), 0) AS ALM_5_EXIST,
+          COALESCE(MAX(CASE WHEN T6.CVE_ALM = 6 THEN T6.EXIST ELSE NULL END), 0) AS ALM_6_EXIST,
+          COALESCE(MAX(CASE WHEN T6.CVE_ALM = 7 THEN T6.EXIST ELSE NULL END), 0) AS ALM_7_EXIST
+      FROM INVE02 T1
+      LEFT JOIN INVE_CLIB02 T4 ON T1.CVE_ART = T4.CVE_PROD
+      LEFT JOIN MULT02 T6 ON T1.CVE_ART = T6.CVE_ART
+      WHERE T1.CVE_ART = ?
+      GROUP BY 1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19
+    `;
+
+    let dataResult = await db.query(sql, [clave]);
+
+    if (dataResult.length === 0) {
+      return res.status(404).json({ error: 'Producto no encontrado.' });
+    }
+
+    // Enriquecimiento (Precios, Último Costo y Existencia Empresa 3)
+    dataResult = await enrichWithPrecios(dataResult, SUCURSAL, lista_precios);
+    dataResult = await enrichWithUltimoCosto(dataResult);
+
+    const id = dataResult[0].CVE_ART.trim();
+    const sql3 = `SELECT EXIST FROM MULT03 WHERE CVE_ALM = 3 AND CVE_ART = ?`;
+    const res3 = await db3.query(sql3, [id]);
+    dataResult[0].ALM_10_EXIST = res3.length > 0 ? res3[0].EXIST : 0;
+
+    const finalData = processExistencias(dataResult);
+    res.json(finalData[0]);
+
+  } catch (error) {
+    console.error("Error en detalle de catalogo:", error);
     res.status(500).json({ error: error.message });
   }
 });
