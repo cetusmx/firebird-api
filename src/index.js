@@ -943,25 +943,27 @@ app.get('/clavesalternas/catalogo', async (req, res) => {
   const numLimit = parseInt(limit) || 10;
   const numOffset = parseInt(offset) || 0;
 
-  // Determinar la tabla de precios según la sucursal para el filtro
-  const priceTable = (SUCURSAL && SUCURSAL.toString() === '3') ? 'PRECIO_X_PROD03' : 'PRECIO_X_PROD02';
+  // Determinar tabla de precios para el filtro inicial
+  const esSucursal3 = SUCURSAL && SUCURSAL.toString() === '3';
+  const priceTable = esSucursal3 ? 'PRECIO_X_PROD03' : 'PRECIO_X_PROD02';
   const cveLista = lista_precios ? lista_precios.toString() : '4';
 
-  // Filtro: Debe tener Costo Promedio > 0 O existir un precio > 0 en la lista seleccionada
+  // FILTROS: 
+  // 1. CAT_ECOMM no sea NULL
+  // 2. Tenga Costo > 0 O tenga Precio > 0 en la lista seleccionada
   let whereClauses = [
-    `(T1.ULT_COSTO > 0 OR EXISTS (SELECT 1 FROM ${priceTable} P WHERE P.CVE_ART = T1.CVE_ART AND TRIM(P.CVE_PRECIO) = CAST(? AS VARCHAR(10)) AND P.PRECIO > 0))`
+    "T4.CAMPLIB24 IS NOT NULL", 
+    ` (T1.ULT_COSTO > 0 OR EXISTS (SELECT 1 FROM ${priceTable} P WHERE P.CVE_ART = T1.CVE_ART AND TRIM(P.CVE_PRECIO) = CAST(? AS VARCHAR(10)) AND P.PRECIO > 0))`
   ];
   let params = [cveLista]; 
   
   const whereString = `WHERE ${whereClauses.join(' AND ')}`;
 
   try {
-    // 1. Conteo total para paginación
     const countSql = `SELECT COUNT(DISTINCT T1.CVE_ART) AS TOTAL FROM INVE02 T1 LEFT JOIN INVE_CLIB02 T4 ON T1.CVE_ART = T4.CVE_PROD ${whereString}`;
     const countRes = await db.query(countSql, params);
     const totalRecords = countRes[0]?.TOTAL || 0;
 
-    // 2. Consulta de datos base
     const sql = `
       SELECT FIRST ${numLimit} SKIP ${numOffset}
           T1.CVE_ART, T1.DESCR, T1.UNI_MED, T1.FCH_ULTCOM, 
@@ -971,7 +973,7 @@ app.get('/clavesalternas/catalogo', async (req, res) => {
           T4.CAMPLIB15 AS CLA_SYR, T4.CAMPLIB16 AS CLA_LC,
           T4.CAMPLIB17 AS SIST_MED, T4.CAMPLIB19 AS DESC_ECOMM, T4.CAMPLIB21 AS GENERO,
           T4.CAMPLIB22 AS FAMILIA, T4.CAMPLIB28 AS COLOCACION,
-          T4.CAMPLIB24 AS CAT_ECOMM, -- <--- Nuevo campo solicitado
+          T4.CAMPLIB24 AS CAT_ECOMM,
           COALESCE(MAX(CASE WHEN T6.CVE_ALM = 1 THEN T6.EXIST ELSE NULL END), 0) AS ALM_1_EXIST,
           COALESCE(MAX(CASE WHEN T6.CVE_ALM = 5 THEN T6.EXIST ELSE NULL END), 0) AS ALM_5_EXIST,
           COALESCE(MAX(CASE WHEN T6.CVE_ALM = 6 THEN T6.EXIST ELSE NULL END), 0) AS ALM_6_EXIST,
@@ -980,13 +982,12 @@ app.get('/clavesalternas/catalogo', async (req, res) => {
       LEFT JOIN INVE_CLIB02 T4 ON T1.CVE_ART = T4.CVE_PROD
       LEFT JOIN MULT02 T6 ON T1.CVE_ART = T6.CVE_ART
       ${whereString}
-      GROUP BY 1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19 -- Agregado el 19 por CAT_ECOMM
+      GROUP BY 1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19
       ORDER BY T1.CVE_ART;
     `;
 
     let dataResult = await db.query(sql, params);
 
-    // 3. Enriquecimiento de datos
     dataResult = await enrichWithPrecios(dataResult, SUCURSAL, lista_precios);
     dataResult = await enrichWithUltimoCosto(dataResult);
 
@@ -1009,7 +1010,6 @@ app.get('/clavesalternas/catalogo', async (req, res) => {
       }
     });
   } catch (error) {
-    console.error("Error en catalogo:", error);
     res.status(500).json({ error: error.message });
   }
 });
