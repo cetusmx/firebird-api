@@ -861,6 +861,7 @@ app.get('/clavesalternas/filter-ranges', async (req, res) => {
   let whereClauses = ["1=1"];
   let params = [];
 
+  // Filtros de rangos dimensionales
   const rangeFilters = [
     { min: diam_int_min, max: diam_int_max, col: 'T4.CAMPLIB1' },
     { min: diam_ext_min, max: diam_ext_max, col: 'T4.CAMPLIB2' },
@@ -881,8 +882,9 @@ app.get('/clavesalternas/filter-ranges', async (req, res) => {
     }
   });
 
+  // NUEVA LÓGICA: Filtro de familia ahora apunta a CAMPLIB24
   if (familia) {
-    whereClauses.push(`UPPER(TRIM(COALESCE(T4.CAMPLIB22, ''))) = UPPER(TRIM(?))`);
+    whereClauses.push(`UPPER(TRIM(COALESCE(T4.CAMPLIB24, ''))) = UPPER(TRIM(?))`);
     params.push(familia);
   }
 
@@ -902,7 +904,7 @@ app.get('/clavesalternas/filter-ranges', async (req, res) => {
           T4.CAMPLIB15 AS CLA_SYR, T4.CAMPLIB16 AS CLA_LC,
           T4.CAMPLIB17 AS SIST_MED, T4.CAMPLIB19 AS DESC_ECOMM, T4.CAMPLIB21 AS GENERO,
           T4.CAMPLIB22 AS FAMILIA, T4.CAMPLIB28 AS COLOCACION,
-          T4.CAMPLIB24 AS CAT_ECOMM, -- <--- Agregado
+          T4.CAMPLIB24 AS CAT_ECOMM,
           COALESCE(MAX(CASE WHEN T6.CVE_ALM = 1 THEN T6.EXIST ELSE NULL END), 0) AS ALM_1_EXIST,
           COALESCE(MAX(CASE WHEN T6.CVE_ALM = 5 THEN T6.EXIST ELSE NULL END), 0) AS ALM_5_EXIST,
           COALESCE(MAX(CASE WHEN T6.CVE_ALM = 6 THEN T6.EXIST ELSE NULL END), 0) AS ALM_6_EXIST,
@@ -911,7 +913,7 @@ app.get('/clavesalternas/filter-ranges', async (req, res) => {
       LEFT JOIN INVE_CLIB02 T4 ON T1.CVE_ART = T4.CVE_PROD
       LEFT JOIN MULT02 T6 ON T1.CVE_ART = T6.CVE_ART
       ${whereString}
-      GROUP BY 1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19 -- <--- Agregado 19
+      GROUP BY 1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19
       ORDER BY T1.CVE_ART;
     `;
 
@@ -1059,8 +1061,9 @@ app.get('/clavesalternas/filter', async (req, res) => {
     }
   }
 
+  // NUEVA LÓGICA: Filtro de familia ahora apunta a CAMPLIB24
   if (familia) {
-    whereClauses.push(`UPPER(TRIM(COALESCE(T4.CAMPLIB22, ''))) = UPPER(TRIM(?))`);
+    whereClauses.push(`UPPER(TRIM(COALESCE(T4.CAMPLIB24, ''))) = UPPER(TRIM(?))`);
     params.push(familia);
   }
 
@@ -1080,7 +1083,7 @@ app.get('/clavesalternas/filter', async (req, res) => {
           T4.CAMPLIB15 AS CLA_SYR, T4.CAMPLIB16 AS CLA_LC,
           T4.CAMPLIB17 AS SIST_MED, T4.CAMPLIB19 AS DESC_ECOMM, T4.CAMPLIB21 AS GENERO,
           T4.CAMPLIB22 AS FAMILIA, T4.CAMPLIB28 AS COLOCACION,
-          T4.CAMPLIB24 AS CAT_ECOMM, -- <--- Agregado
+          T4.CAMPLIB24 AS CAT_ECOMM,
           COALESCE(MAX(CASE WHEN T6.CVE_ALM = 1 THEN T6.EXIST ELSE NULL END), 0) AS ALM_1_EXIST,
           COALESCE(MAX(CASE WHEN T6.CVE_ALM = 5 THEN T6.EXIST ELSE NULL END), 0) AS ALM_5_EXIST,
           COALESCE(MAX(CASE WHEN T6.CVE_ALM = 6 THEN T6.EXIST ELSE NULL END), 0) AS ALM_6_EXIST,
@@ -1089,7 +1092,7 @@ app.get('/clavesalternas/filter', async (req, res) => {
       LEFT JOIN INVE_CLIB02 T4 ON T1.CVE_ART = T4.CVE_PROD
       LEFT JOIN MULT02 T6 ON T1.CVE_ART = T6.CVE_ART
       ${whereString}
-      GROUP BY 1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19 -- <--- Agregado 19
+      GROUP BY 1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19
       ORDER BY T1.CVE_ART;
     `;
 
