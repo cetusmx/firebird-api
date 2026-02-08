@@ -425,13 +425,13 @@ app.get('/familias', async (req, res) => {
 
   const sql = `
     SELECT DISTINCT
-      CAMPLIB22 AS FAMILIA
+      CAMPLIB24 AS FAMILIA
     FROM
       INVE_CLIB02
     WHERE
-      CAMPLIB22 IS NOT NULL 
-      AND CAMPLIB22 <> ''
-      AND UPPER(TRIM(CAMPLIB22)) NOT IN (${placeholders})
+      CAMPLIB24 IS NOT NULL 
+      AND CAMPLIB24 <> ''
+      AND UPPER(TRIM(CAMPLIB24)) NOT IN (${placeholders})
     ORDER BY
       FAMILIA;
   `;
