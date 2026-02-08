@@ -850,7 +850,7 @@ app.get('/clavesalternas/search2', async (req, res) => {
 
 app.get('/clavesalternas/filter-ranges', async (req, res) => {
   const { 
-    lista_precios, SUCURSAL, familia, 
+    lista_precios, SUCURSAL, familia, linea, perfil,
     diam_int_min, diam_int_max, diam_ext_min, diam_ext_max, altura_min, altura_max, 
     limit, offset 
   } = req.query;
@@ -861,7 +861,7 @@ app.get('/clavesalternas/filter-ranges', async (req, res) => {
   let whereClauses = ["1=1"];
   let params = [];
 
-  // Filtros de rangos dimensionales
+  // Rangos dimensionales
   const rangeFilters = [
     { min: diam_int_min, max: diam_int_max, col: 'T4.CAMPLIB1' },
     { min: diam_ext_min, max: diam_ext_max, col: 'T4.CAMPLIB2' },
@@ -882,10 +882,22 @@ app.get('/clavesalternas/filter-ranges', async (req, res) => {
     }
   });
 
-  // NUEVA LÓGICA: Filtro de familia ahora apunta a CAMPLIB24
+  // Filtro de Familia -> CAMPLIB24
   if (familia) {
     whereClauses.push(`UPPER(TRIM(COALESCE(T4.CAMPLIB24, ''))) = UPPER(TRIM(?))`);
     params.push(familia);
+  }
+
+  // Filtro de Perfil -> CAMPLIB13
+  if (perfil) {
+    whereClauses.push(`UPPER(TRIM(COALESCE(T4.CAMPLIB13, ''))) = UPPER(TRIM(?))`);
+    params.push(perfil);
+  }
+
+  // Filtro de Línea -> LIN_PROD
+  if (linea) {
+    whereClauses.push(`UPPER(TRIM(COALESCE(T1.LIN_PROD, ''))) = UPPER(TRIM(?))`);
+    params.push(linea);
   }
 
   const whereString = `WHERE ${whereClauses.join(' AND ')}`;
@@ -1035,13 +1047,15 @@ app.get('/clavesalternas/filter-ranges', async (req, res) => {
 }); */
 
 app.get('/clavesalternas/filter', async (req, res) => {
-  const { lista_precios, SUCURSAL, familia, limit, offset } = req.query;
+  // Extraemos linea y perfil de la query
+  const { lista_precios, SUCURSAL, familia, linea, perfil, limit, offset } = req.query;
   const numLimit = parseInt(limit) || 10;
   const numOffset = parseInt(offset) || 0;
 
   let whereClauses = ["1=1"];
   let params = [];
 
+  // 1. Filtros dimensionales (Exactos/Cercanos)
   const dimensionalFields = {
     diam_int: 'T4.CAMPLIB1',
     diam_ext: 'T4.CAMPLIB2',
@@ -1061,10 +1075,22 @@ app.get('/clavesalternas/filter', async (req, res) => {
     }
   }
 
-  // NUEVA LÓGICA: Filtro de familia ahora apunta a CAMPLIB24
+  // 2. Filtro de Familia (ahora en CAMPLIB24)
   if (familia) {
     whereClauses.push(`UPPER(TRIM(COALESCE(T4.CAMPLIB24, ''))) = UPPER(TRIM(?))`);
     params.push(familia);
+  }
+
+  // 3. Filtro de Perfil (Exclusivo CAMPLIB13)
+  if (perfil) {
+    whereClauses.push(`UPPER(TRIM(COALESCE(T4.CAMPLIB13, ''))) = UPPER(TRIM(?))`);
+    params.push(perfil);
+  }
+
+  // 4. Filtro de Línea (Exclusivo LIN_PROD)
+  if (linea) {
+    whereClauses.push(`UPPER(TRIM(COALESCE(T1.LIN_PROD, ''))) = UPPER(TRIM(?))`);
+    params.push(linea);
   }
 
   const whereString = `WHERE ${whereClauses.join(' AND ')}`;
