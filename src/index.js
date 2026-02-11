@@ -50,7 +50,7 @@ app.use(validateInternalKey);
 app.use(express.json());
 
 // 3. Logs detallados (Para ver quién entra y cuánto tarda)
-app.use(morgan('[:localdate :remote-addr - :method :url :status :response-time ms'));
+app.use(morgan(':localdate :remote-addr - :method :url :status :response-time ms'));
 
 
 // Constantes de mapeo de almacenes (Sucursales)
