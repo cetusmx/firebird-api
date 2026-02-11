@@ -9,6 +9,20 @@ const cors = require('cors');
 const app = express();
 const port = process.env.API_PORT || 3010;
 
+// Definir el token para la hora local
+morgan.token('localdate', (req, res) => {
+    return new Date().toLocaleString('es-MX', {
+        timeZone: 'America/Mexico_City', // Ajusta según tu zona
+        hour12: false,
+        day: '2-digit',
+        month: '2-digit',
+        year: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit'
+    });
+});
+
 const corsOptions = {
   origin: 'http://localhost:5173',
   methods: 'GET,HEAD,PUT,PATCH,POST,DELETE', // Permite todos los métodos necesarios
@@ -36,7 +50,7 @@ app.use(validateInternalKey);
 app.use(express.json());
 
 // 3. Logs detallados (Para ver quién entra y cuánto tarda)
-app.use(morgan(':remote-addr - :method :url :status :response-time ms'));
+app.use(morgan('[:localdate :remote-addr - :method :url :status :response-time ms'));
 
 
 // Constantes de mapeo de almacenes (Sucursales)
