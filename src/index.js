@@ -17,9 +17,26 @@ const corsOptions = {
 
 app.use(cors(corsOptions));
 
+// 2. Middleware de Validación de API Key Interna (Capa 2)
+const validateInternalKey = (req, res, next) => {
+  const apiKey = req.header('x-api-key');
+  const secret = process.env.INTERNAL_SECRET || 'CambiaEsteTokenProvisional';
+  
+  if (apiKey && apiKey === secret) {
+    next();
+  } else {
+    console.warn(`[!] Intento de acceso sin llave desde: ${req.ip}`);
+    res.status(403).json({ error: 'Acceso no autorizado.' });
+  }
+};
+
+app.use(validateInternalKey);
+
 // Middleware para parsear JSON en las solicitudes (aunque no lo necesitemos para solo lectura, es una buena práctica)
 app.use(express.json());
-app.use(morgan());
+
+// 3. Logs detallados (Para ver quién entra y cuánto tarda)
+app.use(morgan(':remote-addr - :method :url :status :response-time ms'));
 
 
 // Constantes de mapeo de almacenes (Sucursales)
