@@ -39,8 +39,15 @@ const validateInternalKey = (req, res, next) => {
   if (apiKey && apiKey === secret) {
     next();
   } else {
-    console.warn(`[!] Intento de acceso sin llave desde: ${req.ip}`);
-    res.status(403).json({ error: 'Acceso no autorizado.' });
+    // Extraemos el método y la URL original para el reporte
+    const { method, originalUrl, ip } = req;
+    
+    console.warn(`[!] BLOQUEADO: ${method} ${originalUrl} - IP: ${ip} - (Razón: Llave ausente o inválida)`);
+    
+    res.status(403).json({ 
+      error: 'Acceso no autorizado.',
+      detalles: 'Se requiere una API Key válida para acceder a este recurso.' 
+    });
   }
 };
 
