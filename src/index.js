@@ -537,7 +537,7 @@ app.get('/existencias', async (req, res) => {
     FROM
       MULT02
     WHERE
-      CVE_ALM IN (1, 6)
+      CVE_ALM IN (1, 5, 6, 7)
     ORDER BY
       CVE_ART, CVE_ALM;
   `;
