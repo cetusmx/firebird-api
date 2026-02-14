@@ -552,21 +552,24 @@ app.get('/existencias', async (req, res) => {
   }
 });
 
-// Nuevo Endpoint para obtener la información base de INVE01 (DESCR, FCH_ULTCOM, ULT_COSTO)
+// Nuevo Endpoint para obtener la información base de INVE02 (DESCR, FCH_ULTCOM, ULT_COSTO), enriquecida con PERFIL de CAMPLIB13
 app.get('/inventario', async (req, res) => {
   const sql = `
     SELECT
-      CVE_ART,
-      DESCR,
-      FCH_ULTCOM,
-      ULT_COSTO,
-      UNI_MED
+      T1.CVE_ART,
+      T1.DESCR,
+      T1.FCH_ULTCOM,
+      T1.ULT_COSTO,
+      T1.UNI_MED,
+      T4.CAMPLIB13 AS PERFIL  -- Campo obtenido de la tabla INVE_CLIB02
     FROM
-      INVE02 
+      INVE02 T1
+    LEFT JOIN
+      INVE_CLIB02 T4 ON T1.CVE_ART = T4.CVE_PROD -- Unión para obtener campos libres
     WHERE
-      STATUS = 'A'
+      T1.STATUS = 'A'
     ORDER BY
-      CVE_ART;
+      T1.CVE_ART;
   `;
 
   try {
