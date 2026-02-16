@@ -1110,6 +1110,133 @@ app.get('/clavesalternas/catalogo/:clave', async (req, res) => {
   }
 });
 
+// Endpoint para obtener datos internos de productos específicos por claves
+//Se utiliza en la tienda, es llamado por /envios/surtir para informar a quien surtirá
+//un pedido, dónde se compró la última vez un producto y en cuánto. También informa en qué
+//sucursales hay existencia.
+app.post('/envios/datos-internos', async (req, res) => {
+  //recibe las claves en un arreglo
+  const { claves, lista_precios, SUCURSAL } = req.body;
+  
+  // Validación: debe recibir un arreglo de claves
+  if (!Array.isArray(claves) || claves.length === 0) {
+    return res.status(400).json({ 
+      error: 'Se requiere un arreglo no vacío de claves de producto.' 
+    });
+  }
+
+  // Limitar el número de claves por seguridad (ej. máximo 100)
+  if (claves.length > 100) {
+    return res.status(400).json({ 
+      error: 'Demasiadas claves. Máximo permitido: 100.' 
+    });
+  }
+
+  try {
+    // Crear placeholders para la cláusula IN
+    const placeholders = claves.map(() => '?').join(', ');
+    
+    // Consulta principal: datos de productos específicos
+    const sql = `
+      SELECT 
+        T1.CVE_ART, 
+        T1.DESCR, 
+        T1.UNI_MED, 
+        T1.FCH_ULTCOM, 
+        T1.ULT_COSTO AS COSTO_PROM, 
+        T1.LIN_PROD,
+        T4.CAMPLIB1 AS DIAM_INT, 
+        T4.CAMPLIB2 AS DIAM_EXT, 
+        T4.CAMPLIB3 AS ALTURA,
+        T4.CAMPLIB7 AS SECCION, 
+        T4.CAMPLIB13 AS PERFIL, 
+        T4.CAMPLIB15 AS CLA_SYR, 
+        T4.CAMPLIB16 AS CLA_LC,
+        T4.CAMPLIB17 AS SIST_MED, 
+        T4.CAMPLIB19 AS DESC_ECOMM, 
+        T4.CAMPLIB21 AS GENERO,
+        T4.CAMPLIB22 AS FAMILIA, 
+        T4.CAMPLIB28 AS COLOCACION,
+        T4.CAMPLIB24 AS CAT_ECOMM,
+        COALESCE(MAX(CASE WHEN T6.CVE_ALM = 1 THEN T6.EXIST ELSE NULL END), 0) AS ALM_1_EXIST,
+        COALESCE(MAX(CASE WHEN T6.CVE_ALM = 5 THEN T6.EXIST ELSE NULL END), 0) AS ALM_5_EXIST,
+        COALESCE(MAX(CASE WHEN T6.CVE_ALM = 6 THEN T6.EXIST ELSE NULL END), 0) AS ALM_6_EXIST,
+        COALESCE(MAX(CASE WHEN T6.CVE_ALM = 7 THEN T6.EXIST ELSE NULL END), 0) AS ALM_7_EXIST
+      FROM INVE02 T1
+      LEFT JOIN INVE_CLIB02 T4 ON T1.CVE_ART = T4.CVE_PROD
+      LEFT JOIN MULT02 T6 ON T1.CVE_ART = T6.CVE_ART
+      WHERE T1.CVE_ART IN (${placeholders})
+      GROUP BY 
+        1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19
+      ORDER BY T1.CVE_ART;
+    `;
+
+    // Ejecutar consulta con las claves
+    let dataResult = await db.query(sql, claves);
+    
+    // Verificar si se encontraron productos
+    if (dataResult.length === 0) {
+      return res.status(404).json({ 
+        error: 'No se encontraron productos con las claves proporcionadas.' 
+      });
+    }
+
+    // Enriquecer con precios (misma lógica que filter)
+    dataResult = await enrichWithPrecios(dataResult, SUCURSAL, lista_precios);
+    
+    // Enriquecer con último costo y proveedor
+    dataResult = await enrichWithUltimoCosto(dataResult);
+
+    // Enriquecer con existencias de Empresa 3 (Fresnillo)
+    const ids = dataResult.map(item => item.CVE_ART.trim());
+    const sql3 = `
+      SELECT TRIM(CVE_ART) AS ART, EXIST 
+      FROM MULT03 
+      WHERE CVE_ALM = 3 AND CVE_ART IN (${ids.map(() => '?').join(',')})
+    `;
+    
+    try {
+      const res3 = await db3.query(sql3, ids);
+      const map3 = {};
+      res3.forEach(r => map3[r.ART] = r.EXIST);
+      
+      dataResult = dataResult.map(item => ({
+        ...item,
+        ALM_10_EXIST: map3[item.CVE_ART.trim()] || 0
+      }));
+    } catch (err3) {
+      console.error('Error al obtener existencias de Empresa 3:', err3);
+      dataResult = dataResult.map(item => ({ 
+        ...item, 
+        ALM_10_EXIST: 0 
+      }));
+    }
+
+    // Procesar existencias a formato de objeto
+    const processedData = processExistencias(dataResult);
+
+    // Responder con los datos
+    res.json({
+      success: true,
+      count: processedData.length,
+      data: processedData,
+      metadata: {
+        claves_solicitadas: claves.length,
+        claves_encontradas: processedData.length,
+        lista_precios: lista_precios || '4',
+        sucursal: SUCURSAL || '1'
+      }
+    });
+
+  } catch (error) {
+    console.error('Error en /envios/datos-internos:', error);
+    res.status(500).json({ 
+      error: 'Error interno del servidor.',
+      detalles: error.message 
+    });
+  }
+});
+
 // Iniciar el servidor
 app.listen(port, () => {
   console.log(`Servidor escuchando en http://localhost:${port}`);
