@@ -1237,6 +1237,54 @@ app.post('/envios/datos-internos', async (req, res) => {
   }
 });
 
+// Endpoint para análisis de precios sin paginación
+app.get('/clavesalternas/analisis-precios', async (req, res) => {
+  // Consulta simplificada uniendo INVE02 e INVE_CLIB02
+  const sql = `
+    SELECT 
+        T1.CVE_ART AS clave, 
+        T1.ULT_COSTO AS costo_prom, 
+        T1.LIN_PROD AS linea,
+        T4.CAMPLIB15 AS cla_syr, 
+        T4.CAMPLIB16 AS cla_lc, 
+        T4.CAMPLIB21 AS genero, 
+        T4.CAMPLIB22 AS familia
+    FROM INVE02 T1
+    LEFT JOIN INVE_CLIB02 T4 ON T1.CVE_ART = T4.CVE_PROD
+    WHERE T1.STATUS = 'A'
+    ORDER BY T1.CVE_ART;
+  `;
+
+  try {
+    const productos = await db.query(sql);
+
+    if (productos.length === 0) {
+      return res.json([]);
+    }
+
+    // Enriquecer con el último costo desde MINVE02
+    // Se utiliza la función existente para obtener los movimientos de inventario
+    const productosEnriquecidos = await enrichWithUltimoCosto(productos);
+
+    // Renombrar el campo COSTO a ultimo_costo según lo solicitado
+    const resultadoFinal = productosEnriquecidos.map(prod => {
+      const { COSTO, ...resto } = prod;
+      return {
+        ...resto,
+        ultimo_costo: COSTO || 0 // Renombrado de COSTO a ultimo_costo
+      };
+    });
+
+    res.json(resultadoFinal);
+  } catch (error) {
+    console.error('Error en /clavesalternas/analisis-precios:', error);
+    res.status(500).json({ 
+      error: 'Error al procesar el análisis de precios.', 
+      detalles: error.message 
+    });
+  }
+});
+
 // Iniciar el servidor
 app.listen(port, () => {
   console.log(`Servidor escuchando en http://localhost:${port}`);
