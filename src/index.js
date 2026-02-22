@@ -135,21 +135,25 @@ async function enrichWithUltimoCosto(data) {
     console.error("Error en MINVE02:", error);
     return data.map(item => ({ ...item, ULTIMO_PROVEEDOR: '', ULT_COSTO: 0 }));
   }
-}
+};
 
 const enrichWithUltimoCosto2 = async (data) => {
   if (!data || data.length === 0) return data;
 
-  const clavesOriginales = data.map(prod => (prod.CVE_ART || '').trim());
-  const CHUNK_SIZE = 1000; // Límite seguro para Firebird
+  // Extraemos las claves únicas para procesar menos datos
+  const clavesOriginales = [...new Set(data.map(prod => (prod.CVE_ART || '').trim()))];
+  
+  // Reducimos el lote a 500 para evitar el error de "Block size exceeds"
+  const CHUNK_SIZE = 500; 
   const resultsMap = {};
 
   try {
-    // Procesamos por lotes para evitar el límite de 1500 valores en el IN
     for (let i = 0; i < clavesOriginales.length; i += CHUNK_SIZE) {
       const chunk = clavesOriginales.slice(i, i + CHUNK_SIZE);
       const placeholders = chunk.map(() => '?').join(',');
 
+      // Optimizamos la consulta eliminando subconsultas pesadas si es posible
+      // o manteniendo la lógica pero en bloques más pequeños
       const sqlMinve = `
         SELECT TRIM(CVE_ART) AS ART, COSTO
         FROM MINVE02
@@ -169,14 +173,14 @@ const enrichWithUltimoCosto2 = async (data) => {
       });
     }
 
-    // Retornamos los datos originales con el campo COSTO inyectado
+    // Mapeo final de los resultados al objeto original
     return data.map(item => ({
       ...item,
       COSTO: resultsMap[(item.CVE_ART || '').trim()] || 0
     }));
 
   } catch (error) {
-    console.error('Error en MINVE02 procesando lotes:', error);
+    console.error('Error en MINVE02 (enrichWithUltimoCosto2):', error);
     return data.map(item => ({ ...item, COSTO: 0 }));
   }
 };
