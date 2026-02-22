@@ -137,6 +137,50 @@ async function enrichWithUltimoCosto(data) {
   }
 }
 
+const enrichWithUltimoCosto2 = async (data) => {
+  if (!data || data.length === 0) return data;
+
+  const clavesOriginales = data.map(prod => (prod.CVE_ART || '').trim());
+  const CHUNK_SIZE = 1000; // Límite seguro para Firebird
+  const resultsMap = {};
+
+  try {
+    // Procesamos por lotes para evitar el límite de 1500 valores en el IN
+    for (let i = 0; i < clavesOriginales.length; i += CHUNK_SIZE) {
+      const chunk = clavesOriginales.slice(i, i + CHUNK_SIZE);
+      const placeholders = chunk.map(() => '?').join(',');
+
+      const sqlMinve = `
+        SELECT TRIM(CVE_ART) AS ART, COSTO
+        FROM MINVE02
+        WHERE CVE_ART IN (${placeholders})
+          AND (TRIM(REFER) STARTING WITH 'E' OR TRIM(REFER) STARTING WITH 'C')
+          AND FECHA_DOCU = (
+            SELECT MAX(FECHA_DOCU)
+            FROM MINVE02
+            WHERE CVE_ART = MINVE02.CVE_ART
+              AND (TRIM(REFER) STARTING WITH 'E' OR TRIM(REFER) STARTING WITH 'C')
+          )
+      `;
+
+      const resMinve = await db.query(sqlMinve, chunk);
+      resMinve.forEach(row => {
+        resultsMap[row.ART] = row.COSTO;
+      });
+    }
+
+    // Retornamos los datos originales con el campo COSTO inyectado
+    return data.map(item => ({
+      ...item,
+      COSTO: resultsMap[(item.CVE_ART || '').trim()] || 0
+    }));
+
+  } catch (error) {
+    console.error('Error en MINVE02 procesando lotes:', error);
+    return data.map(item => ({ ...item, COSTO: 0 }));
+  }
+};
+
 /**
  * Obtiene los precios de la tabla correspondiente (02 o 03) según la SUCURSAL
  * y la lista_precios solicitada.
@@ -1263,7 +1307,7 @@ app.get('/clavesalternas/analisis-precios', async (req, res) => {
     }
 
     // 2. Ahora la función encontrará prod.CVE_ART y podrá hacer el .trim() sin errores
-    const productosEnriquecidos = await enrichWithUltimoCosto(productos);
+    const productosEnriquecidos = await enrichWithUltimoCosto2(productos);
 
     // 3. Realizamos el mapeo final de nombres aquí
     const resultadoFinal = productosEnriquecidos.map(prod => {
