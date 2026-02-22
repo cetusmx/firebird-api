@@ -1239,10 +1239,10 @@ app.post('/envios/datos-internos', async (req, res) => {
 
 // Endpoint para análisis de precios sin paginación
 app.get('/clavesalternas/analisis-precios', async (req, res) => {
-  // Consulta simplificada uniendo INVE02 e INVE_CLIB02
+  // 1. Mantenemos CVE_ART para que enrichWithUltimoCosto no falle
   const sql = `
     SELECT 
-        T1.CVE_ART AS clave, 
+        T1.CVE_ART, 
         T1.ULT_COSTO AS costo_prom, 
         T1.LIN_PROD AS linea,
         T4.CAMPLIB15 AS cla_syr, 
@@ -1262,16 +1262,20 @@ app.get('/clavesalternas/analisis-precios', async (req, res) => {
       return res.json([]);
     }
 
-    // Enriquecer con el último costo desde MINVE02
-    // Se utiliza la función existente para obtener los movimientos de inventario
+    // 2. Ahora la función encontrará prod.CVE_ART y podrá hacer el .trim() sin errores
     const productosEnriquecidos = await enrichWithUltimoCosto(productos);
 
-    // Renombrar el campo COSTO a ultimo_costo según lo solicitado
+    // 3. Realizamos el mapeo final de nombres aquí
     const resultadoFinal = productosEnriquecidos.map(prod => {
-      const { COSTO, ...resto } = prod;
       return {
-        ...resto,
-        ultimo_costo: COSTO || 0 // Renombrado de COSTO a ultimo_costo
+        clave: prod.CVE_ART.trim(), // Renombramos aquí
+        costo_prom: prod.costo_prom,
+        linea: prod.linea,
+        cla_syr: prod.cla_syr,
+        cla_lc: prod.cla_lc,
+        genero: prod.genero,
+        familia: prod.familia,
+        ultimo_costo: prod.COSTO || 0 // Renombrado de COSTO (que viene de MINVE02)
       };
     });
 
