@@ -1287,16 +1287,16 @@ app.post('/envios/datos-internos', async (req, res) => {
 
 // Endpoint para análisis de precios sin paginación
 app.get('/clavesalternas/analisis-precios', async (req, res) => {
-  // 1. Mantenemos CVE_ART para que enrichWithUltimoCosto no falle
+  // 1. Consulta con nombres claros
   const sql = `
     SELECT 
         T1.CVE_ART, 
-        T1.ULT_COSTO AS costo_prom, 
-        T1.LIN_PROD AS linea,
-        T4.CAMPLIB15 AS cla_syr, 
-        T4.CAMPLIB16 AS cla_lc, 
-        T4.CAMPLIB21 AS genero, 
-        T4.CAMPLIB22 AS familia
+        T1.ULT_COSTO, 
+        T1.LIN_PROD,
+        T4.CAMPLIB15, 
+        T4.CAMPLIB16, 
+        T4.CAMPLIB21, 
+        T4.CAMPLIB22
     FROM INVE02 T1
     LEFT JOIN INVE_CLIB02 T4 ON T1.CVE_ART = T4.CVE_PROD
     WHERE T1.STATUS = 'A'
@@ -1306,24 +1306,26 @@ app.get('/clavesalternas/analisis-precios', async (req, res) => {
   try {
     const productos = await db.query(sql);
 
-    if (productos.length === 0) {
+    if (!productos || productos.length === 0) {
       return res.json([]);
     }
 
-    // 2. Ahora la función encontrará prod.CVE_ART y podrá hacer el .trim() sin errores
+    // 2. Enriquecer con el último costo desde MINVE02
+    // Esta función nos devuelve el campo 'COSTO' inyectado en cada objeto
     const productosEnriquecidos = await enrichWithUltimoCosto2(productos);
 
-    // 3. Realizamos el mapeo final de nombres aquí
+    // 3. Mapeo Robusto: 
+    // Forzamos el acceso a las propiedades tal cual las devuelve Firebird (Mayúsculas habitualmente)
     const resultadoFinal = productosEnriquecidos.map(prod => {
       return {
-        clave: prod.CVE_ART.trim(), // Renombramos aquí
+        clave: (prod.CVE_ART || '').trim(),
         costo_prom: prod.ULT_COSTO || 0,
         linea: (prod.LIN_PROD || '').trim(),
         cla_syr: (prod.CAMPLIB15 || '').trim(),
         cla_lc: (prod.CAMPLIB16 || '').trim(),
         genero: (prod.CAMPLIB21 || '').trim(),
         familia: (prod.CAMPLIB22 || '').trim(),
-        ultimo_costo: prod.COSTO || 0 // Renombrado de COSTO (que viene de MINVE02)
+        ultimo_costo: prod.COSTO || 0 // Campo inyectado por enrichWithUltimoCosto2
       };
     });
 
