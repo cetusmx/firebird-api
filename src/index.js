@@ -140,9 +140,11 @@ async function enrichWithUltimoCosto(data) {
 const enrichWithUltimoCosto2 = async (data) => {
   if (!data || data.length === 0) return data;
 
-  // Extraer claves únicas y limpiar espacios
+  // Extraemos las claves únicas
   const clavesOriginales = [...new Set(data.map(prod => (prod.CVE_ART || '').trim()))];
-  const CHUNK_SIZE = 500;
+  
+  // Dividimos en lotes de 500 para evitar límites de Firebird
+  const CHUNK_SIZE = 500; 
   const resultsMap = {};
 
   try {
@@ -150,38 +152,34 @@ const enrichWithUltimoCosto2 = async (data) => {
       const chunk = clavesOriginales.slice(i, i + CHUNK_SIZE);
       const placeholders = chunk.map(() => '?').join(',');
 
-      // Nota: Usamos TRIM en el SELECT para que la llave del mapa sea limpia
+      // TU CONSULTA ORIGINAL (Recuperada y Adaptada)
       const sqlMinve = `
-        SELECT TRIM(CVE_ART) AS ART, COSTO
+        SELECT TRIM(CVE_ART) AS ART, COSTO, NUM_MOV
         FROM MINVE02
-        WHERE CVE_ART IN (${placeholders})
-          AND (TRIM(REFER) STARTING WITH 'E' OR TRIM(REFER) STARTING WITH 'C')
-          AND FECHA_DOCU = (
-            SELECT MAX(FECHA_DOCU)
-            FROM MINVE02
-            WHERE CVE_ART = MINVE02.CVE_ART
-              AND (TRIM(REFER) STARTING WITH 'E' OR TRIM(REFER) STARTING WITH 'C')
-          )
+        WHERE CVE_CPTO = 1 AND CVE_ART IN (${placeholders})
+        ORDER BY NUM_MOV DESC
       `;
 
       const resMinve = await db.query(sqlMinve, chunk);
+      
+      // Al estar ordenado por NUM_MOV DESC, el primer registro de cada producto
+      // que procesemos será el más reciente.
       resMinve.forEach(row => {
-        // Guardamos en el mapa usando la clave limpia
-        resultsMap[row.ART] = row.COSTO;
+        const art = row.ART;
+        if (resultsMap[art] === undefined) {
+          resultsMap[art] = row.COSTO;
+        }
       });
     }
 
-    // Inyectar el costo en el array original
-    return data.map(item => {
-      const claveLimpia = (item.CVE_ART || '').trim();
-      return {
-        ...item,
-        COSTO_HISTORICO: resultsMap[claveLimpia] || 0
-      };
-    });
+    // Inyectamos el costo en el array original
+    return data.map(item => ({
+      ...item,
+      COSTO_FINAL: resultsMap[(item.CVE_ART || '').trim()] || 0
+    }));
 
   } catch (error) {
-    console.error('Error en MINVE02 (enrichWithUltimoCosto2):', error);
+    console.error('Error en enrichWithUltimoCosto2 con lógica original:', error);
     return data;
   }
 };
@@ -1326,7 +1324,7 @@ app.get('/clavesalternas/analisis-precios', async (req, res) => {
         cla_lc: (prod.CAMPLIB16 || '').trim(),
         genero: (prod.CAMPLIB21 || '').trim(),
         familia: (prod.CAMPLIB22 || '').trim(),
-        ultimo_costo: prod.COSTO_HISTORICO || 0 // Campo inyectado por enrichWithUltimoCosto2
+        ultimo_costo: prod.COSTO_FINAL || 0 // Campo inyectado por enrichWithUltimoCosto2
       };
     });
 
