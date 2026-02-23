@@ -140,11 +140,9 @@ async function enrichWithUltimoCosto(data) {
 const enrichWithUltimoCosto2 = async (data) => {
   if (!data || data.length === 0) return data;
 
-  // Extraemos las claves únicas para procesar menos datos
+  // Extraer claves únicas y limpiar espacios
   const clavesOriginales = [...new Set(data.map(prod => (prod.CVE_ART || '').trim()))];
-  
-  // Reducimos el lote a 500 para evitar el error de "Block size exceeds"
-  const CHUNK_SIZE = 500; 
+  const CHUNK_SIZE = 500;
   const resultsMap = {};
 
   try {
@@ -152,8 +150,7 @@ const enrichWithUltimoCosto2 = async (data) => {
       const chunk = clavesOriginales.slice(i, i + CHUNK_SIZE);
       const placeholders = chunk.map(() => '?').join(',');
 
-      // Optimizamos la consulta eliminando subconsultas pesadas si es posible
-      // o manteniendo la lógica pero en bloques más pequeños
+      // Nota: Usamos TRIM en el SELECT para que la llave del mapa sea limpia
       const sqlMinve = `
         SELECT TRIM(CVE_ART) AS ART, COSTO
         FROM MINVE02
@@ -169,19 +166,23 @@ const enrichWithUltimoCosto2 = async (data) => {
 
       const resMinve = await db.query(sqlMinve, chunk);
       resMinve.forEach(row => {
+        // Guardamos en el mapa usando la clave limpia
         resultsMap[row.ART] = row.COSTO;
       });
     }
 
-    // Mapeo final de los resultados al objeto original
-    return data.map(item => ({
-      ...item,
-      COSTO: resultsMap[(item.CVE_ART || '').trim()] || 0
-    }));
+    // Inyectar el costo en el array original
+    return data.map(item => {
+      const claveLimpia = (item.CVE_ART || '').trim();
+      return {
+        ...item,
+        COSTO_HISTORICO: resultsMap[claveLimpia] || 0
+      };
+    });
 
   } catch (error) {
     console.error('Error en MINVE02 (enrichWithUltimoCosto2):', error);
-    return data.map(item => ({ ...item, COSTO: 0 }));
+    return data;
   }
 };
 
@@ -1325,7 +1326,7 @@ app.get('/clavesalternas/analisis-precios', async (req, res) => {
         cla_lc: (prod.CAMPLIB16 || '').trim(),
         genero: (prod.CAMPLIB21 || '').trim(),
         familia: (prod.CAMPLIB22 || '').trim(),
-        ultimo_costo: prod.COSTO || 0 // Campo inyectado por enrichWithUltimoCosto2
+        ultimo_costo: prod.COSTO_HISTORICO || 0 // Campo inyectado por enrichWithUltimoCosto2
       };
     });
 
