@@ -1317,12 +1317,12 @@ app.get('/clavesalternas/analisis-precios', async (req, res) => {
     const resultadoFinal = productosEnriquecidos.map(prod => {
       return {
         clave: prod.CVE_ART.trim(), // Renombramos aquí
-        costo_prom: prod.costo_prom,
-        linea: prod.linea,
-        cla_syr: prod.cla_syr,
-        cla_lc: prod.cla_lc,
-        genero: prod.genero,
-        familia: prod.familia,
+        costo_prom: prod.ULT_COSTO || 0,
+        linea: (prod.LIN_PROD || '').trim(),
+        cla_syr: (prod.CAMPLIB15 || '').trim(),
+        cla_lc: (prod.CAMPLIB16 || '').trim(),
+        genero: (prod.CAMPLIB21 || '').trim(),
+        familia: (prod.CAMPLIB22 || '').trim(),
         ultimo_costo: prod.COSTO || 0 // Renombrado de COSTO (que viene de MINVE02)
       };
     });
