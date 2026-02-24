@@ -1291,7 +1291,7 @@ app.get('/clavesalternas/analisis-precios', async (req, res) => {
     SELECT 
         T1.CVE_ART, 
         T1.DESCR,
-        T1.EXISTENCIA,
+        T1.EXIST,
         T1.ULT_COSTO, 
         T1.LIN_PROD,
         T4.CAMPLIB15, 
