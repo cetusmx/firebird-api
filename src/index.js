@@ -1322,7 +1322,7 @@ app.get('/clavesalternas/analisis-precios', async (req, res) => {
       return {
         clave: (prod.CVE_ART || '').trim(),
         descripcion: (prod.DESCR || '').trim(),
-        existencia: (prod.EXIST || '').trim(),
+        existencia: prod.EXIST || 0,
         costo_prom: prod.ULT_COSTO || 0,
         linea: (prod.LIN_PROD || '').trim(),
         cla_syr: (prod.CAMPLIB15 || '').trim(),
