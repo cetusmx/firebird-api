@@ -1286,7 +1286,7 @@ app.post('/envios/datos-internos', async (req, res) => {
 
 // Endpoint para análisis de precios sin paginación
 app.get('/clavesalternas/analisis-precios', async (req, res) => {
-  // 1. Consulta con nombres claros
+  // 1. Consulta SQL con el JOIN a PRECIO_X_PROD02
   const sql = `
     SELECT 
         T1.CVE_ART, 
@@ -1295,9 +1295,12 @@ app.get('/clavesalternas/analisis-precios', async (req, res) => {
         T4.CAMPLIB15, 
         T4.CAMPLIB16, 
         T4.CAMPLIB21, 
-        T4.CAMPLIB22
+        T4.CAMPLIB22,
+        T5.PRECIO -- Obtenemos el precio de la nueva tabla
     FROM INVE02 T1
     LEFT JOIN INVE_CLIB02 T4 ON T1.CVE_ART = T4.CVE_PROD
+    -- Unimos con la tabla de precios filtrando por la lista 1
+    LEFT JOIN PRECIO_X_PROD02 T5 ON T1.CVE_ART = T5.CVE_ART AND T5.CVE_PRECIO = 1
     WHERE T1.STATUS = 'A'
     ORDER BY T1.CVE_ART;
   `;
@@ -1309,12 +1312,10 @@ app.get('/clavesalternas/analisis-precios', async (req, res) => {
       return res.json([]);
     }
 
-    // 2. Enriquecer con el último costo desde MINVE02
-    // Esta función nos devuelve el campo 'COSTO' inyectado en cada objeto
+    // 2. Enriquecer con el último costo desde MINVE02 (Compras CVE_CPTO = 1)
     const productosEnriquecidos = await enrichWithUltimoCosto2(productos);
 
-    // 3. Mapeo Robusto: 
-    // Forzamos el acceso a las propiedades tal cual las devuelve Firebird (Mayúsculas habitualmente)
+    // 3. Mapeo final incluyendo el nuevo campo 'precio'
     const resultadoFinal = productosEnriquecidos.map(prod => {
       return {
         clave: (prod.CVE_ART || '').trim(),
@@ -1324,7 +1325,8 @@ app.get('/clavesalternas/analisis-precios', async (req, res) => {
         cla_lc: (prod.CAMPLIB16 || '').trim(),
         genero: (prod.CAMPLIB21 || '').trim(),
         familia: (prod.CAMPLIB22 || '').trim(),
-        ultimo_costo: prod.COSTO_FINAL || 0 // Campo inyectado por enrichWithUltimoCosto2
+        precio: prod.PRECIO || 0, // Nuevo campo solicitado
+        ultimo_costo: prod.COSTO_FINAL || 0 // Valor obtenido por enrichWithUltimoCosto2
       };
     });
 
