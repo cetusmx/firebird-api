@@ -1291,6 +1291,7 @@ app.get('/clavesalternas/analisis-precios', async (req, res) => {
     SELECT 
         T1.CVE_ART, 
         T1.DESCR,
+        T1.EXISTENCIA,
         T1.ULT_COSTO, 
         T1.LIN_PROD,
         T4.CAMPLIB15, 
@@ -1321,6 +1322,7 @@ app.get('/clavesalternas/analisis-precios', async (req, res) => {
       return {
         clave: (prod.CVE_ART || '').trim(),
         descripcion: (prod.DESCR || '').trim(),
+        existencia: (prod.EXISTENCIA || '').trim(),
         costo_prom: prod.ULT_COSTO || 0,
         linea: (prod.LIN_PROD || '').trim(),
         cla_syr: (prod.CAMPLIB15 || '').trim(),
