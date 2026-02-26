@@ -24,7 +24,7 @@ morgan.token('localdate', (req, res) => {
 });
 
 const corsOptions = {
-  origin: 'http://localhost:5173',
+  origin: '*',
   methods: 'GET,HEAD,PUT,PATCH,POST,DELETE', // Permite todos los métodos necesarios
   credentials: true, // Si necesitas enviar cookies o cabeceras de autorización
 };
