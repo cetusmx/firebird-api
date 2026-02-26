@@ -1344,6 +1344,38 @@ app.get('/clavesalternas/analisis-precios', async (req, res) => {
   }
 });
 
+// Endpoint para Autocomplete / Buscador rápido
+app.get('/clavesalternas/buscar', async (req, res) => {
+  const { q } = req.query; // El texto que el usuario escribe
+
+  if (!q || q.length < 2) {
+    return res.json([]); // No buscar si hay menos de 2 caracteres
+  }
+
+  // Convertimos a mayúsculas para asegurar coincidencia en Firebird
+  const queryTerm = `%${q.toUpperCase()}%`;
+
+  // Buscamos en Clave y Descripción, limitando a 20 resultados
+  // Nota: FIRST 20 es la sintaxis de Firebird para limitar resultados
+  const sql = `
+    SELECT FIRST 20
+        TRIM(CVE_ART) AS clave,
+        TRIM(DESCR) AS descripcion
+    FROM INVE02
+    WHERE STATUS = 'A' 
+      AND (UPPER(CVE_ART) LIKE ? OR UPPER(DESCR) LIKE ?)
+    ORDER BY CVE_ART
+  `;
+
+  try {
+    const resultados = await db.query(sql, [queryTerm, queryTerm]);
+    res.json(resultados);
+  } catch (error) {
+    console.error('Error en el buscador autocomplete:', error);
+    res.status(500).json({ error: 'Error al buscar productos' });
+  }
+});
+
 // Iniciar el servidor
 app.listen(port, () => {
   console.log(`Servidor escuchando en http://localhost:${port}`);
