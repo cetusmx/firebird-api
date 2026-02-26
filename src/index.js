@@ -1358,7 +1358,7 @@ app.get('/clavesalternas/buscar', async (req, res) => {
   // Buscamos en Clave y Descripción, limitando a 20 resultados
   // Nota: FIRST 20 es la sintaxis de Firebird para limitar resultados
   const sql = `
-    SELECT FIRST 20
+    SELECT FIRST 10
         TRIM(CVE_ART) AS clave,
         TRIM(DESCR) AS descripcion
     FROM INVE02
