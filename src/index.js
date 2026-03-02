@@ -1376,6 +1376,97 @@ app.get('/clavesalternas/buscar', async (req, res) => {
   }
 });
 
+app.post('/clavesalternas/auditoria-margenes1', async (req, res) => {
+  const { fechaInicio, fechaFin, almacen, cliente, vendedor } = req.body;
+
+  // Lógica para determinar el rango de fechas
+  let f_inicio = fechaInicio;
+  let f_fin = fechaFin;
+
+  // Si no se recibe intervalo, usamos la fecha actual
+  if (!f_inicio || !f_fin) {
+    const hoy = new Date().toISOString().split('T')[0]; // Formato YYYY-MM-DD
+    f_inicio = hoy;
+    f_fin = hoy;
+    console.log(`Consultando auditoría para la fecha actual: ${hoy}`);
+  }
+
+  let sql = `
+    SELECT 
+      M.CVE_ART, M.ALMACEN, M.CVE_CPTO, M.FECHA_DOCU, M.TIPO_DOC, M.REFER, 
+      M.CLAVE_CLPV, M.VEND, M.CANT, M.PRECIO, M.COSTO, M.FECHAELAB, 
+      M.COSTO_PROM_INI, M.COSTO_PROM_FIN, M.COSTO_PROM_GRAL,
+      I.DESCR, I.LIN_PROD, I.FCH_ULTCOM, I.EXIST, I.COSTO_PROM, I.ULT_COSTO,
+      C.CAMPLIB21 AS GENERO, C.CAMPLIB22 AS FAMILIA, C.CAMPLIB24 AS CAT_ECOMM
+    FROM MINVE02 M
+    LEFT JOIN INVE02 I ON M.CVE_ART = I.CVE_ART
+    LEFT JOIN INVE_CLIB02 C ON M.CVE_ART = C.CVE_PROD
+    WHERE M.CVE_CPTO = 51
+      AND M.FECHAELAB BETWEEN ? AND ?
+  `;
+
+  const params = [f_inicio, f_fin];
+
+  // Filtro de Fechas (Obligatorio o sugerido para rendimiento)
+  /* if (fechaInicio && fechaFin) {
+    sql += ` AND M.FECHAELAB BETWEEN ? AND ? `;
+    params.push(fechaInicio, fechaFin);
+  } */
+
+  // Filtros adicionales opcionales
+  if (almacen) {
+    sql += ` AND M.ALMACEN = ? `;
+    params.push(almacen);
+  }
+  if (cliente) {
+    sql += ` AND M.CLAVE_CLPV = ? `;
+    params.push(cliente);
+  }
+  if (vendedor) {
+    sql += ` AND M.VEND = ? `;
+    params.push(vendedor);
+  }
+
+  sql += ` ORDER BY M.FECHAELAB ASC `;
+
+  try {
+    const data = await db.query(sql, params);
+    
+    // Mapeo para limpiar espacios y formatear respuesta
+    const resultado = data.map(row => ({
+      clave_art: (row.CVE_ART || '').trim(),
+      almacen: row.ALMACEN,
+      cve_cpto: row.CVE_CPTO,
+      fecha_docu: row.FECHA_DOCU,
+      tipo_doc: row.TIPO_DOC,
+      refer: (row.REFER || '').trim(),
+      cliente: (row.CLAVE_CLPV || '').trim(),
+      vendedor: (row.VEND || '').trim(),
+      cantidad: row.CANT,
+      precio: row.PRECIO,
+      costo: row.COSTO,
+      fecha_elab: row.FECHAELAB,
+      costo_prom_ini: row.COSTO_PROM_INI,
+      costo_prom_fin: row.COSTO_PROM_FIN,
+      costo_prom_gral: row.COSTO_PROM_GRAL,
+      descripcion: (row.DESCR || '').trim(),
+      linea: (row.LIN_PROD || '').trim(),
+      fecha_ult_compra: row.FCH_ULTCOM,
+      existencia: row.EXIST,
+      costo_promedio: row.COSTO_PROM,
+      ultimo_costo: row.ULT_COSTO,
+      genero: (row.GENERO || '').trim(),
+      familia: (row.FAMILIA || '').trim(),
+      cat_ecomm: (row.CAT_ECOMM || '').trim()
+    }));
+
+    res.json(resultado);
+  } catch (error) {
+    console.error('Error en auditoria-margenes1:', error);
+    res.status(500).json({ error: 'Error al consultar auditoría de márgenes.' });
+  }
+});
+
 // Iniciar el servidor
 app.listen(port, () => {
   console.log(`Servidor escuchando en http://localhost:${port}`);
