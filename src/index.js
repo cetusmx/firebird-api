@@ -1415,16 +1415,16 @@ app.post('/clavesalternas/auditoria-margenes1', async (req, res) => {
 
   // Filtros adicionales opcionales
   if (almacen) {
-    sql += ` AND M.ALMACEN = ? `;
-    params.push(almacen);
+    sql += ` AND TRIM(M.ALMACEN) = ? `;
+    params.push(String(almacen).trim());
   }
   if (cliente) {
-    sql += ` AND M.CLAVE_CLPV = ? `;
-    params.push(cliente);
+    sql += ` AND TRIM(M.CLAVE_CLPV) = ? `;
+    params.push(String(cliente).trim());
   }
   if (vendedor) {
-    sql += ` AND M.VEND = ? `;
-    params.push(vendedor);
+    sql += ` AND TRIM(M.VEND) = ? `;
+    params.push(String(vendedor).trim());
   }
 
   sql += ` ORDER BY M.FECHAELAB ASC `;
