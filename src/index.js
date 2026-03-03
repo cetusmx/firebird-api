@@ -1406,7 +1406,7 @@ app.post('/clavesalternas/auditoria-margenes1', async (req, res) => {
     LEFT JOIN INVE02 I ON M.CVE_ART = I.CVE_ART
     LEFT JOIN INVE_CLIB02 C ON M.CVE_ART = C.CVE_PROD
     WHERE M.CVE_CPTO = 51
-      AND M.FECHAELAB BETWEEN ? AND ?
+      AND CAST(M.FECHAELAB AS DATE) BETWEEN ? AND ?
   `;
 
   const params = [f_inicio, f_fin];
@@ -1436,7 +1436,7 @@ app.post('/clavesalternas/auditoria-margenes1', async (req, res) => {
   // LOG 2: Verificar la SQL final y sus parámetros
   console.log('SQL Ejecutada:', sql);
   console.log('Parámetros:', params);
-  
+
   try {
     const data = await db.query(sql, params);
     
