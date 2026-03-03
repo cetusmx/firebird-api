@@ -1378,8 +1378,8 @@ app.get('/clavesalternas/buscar', async (req, res) => {
 
 app.post('/clavesalternas/auditoria-margenes1', async (req, res) => {
   // LOG 1: Visualizar el payload que llega del frontend
-  console.log('--- Nueva petición a /auditoria-margenes1 ---');
-  console.log('Payload recibido:', JSON.stringify(req.body, null, 2));
+  /* console.log('--- Nueva petición a /auditoria-margenes1 ---');
+  console.log('Payload recibido:', JSON.stringify(req.body, null, 2)); */
 
   const { fechaInicio, fechaFin, almacen, cliente, vendedor } = req.body;
 
@@ -1392,7 +1392,7 @@ app.post('/clavesalternas/auditoria-margenes1', async (req, res) => {
     const hoy = new Date().toISOString().split('T')[0]; // Formato YYYY-MM-DD
     f_inicio = hoy;
     f_fin = hoy;
-    console.log(`Consultando auditoría para la fecha actual: ${hoy}`);
+    //console.log(`Consultando auditoría para la fecha actual: ${hoy}`);
   }
 
   let sql = `
@@ -1434,8 +1434,8 @@ app.post('/clavesalternas/auditoria-margenes1', async (req, res) => {
   sql += ` ORDER BY M.FECHAELAB ASC `;
 
   // LOG 2: Verificar la SQL final y sus parámetros
-  console.log('SQL Ejecutada:', sql);
-  console.log('Parámetros:', params);
+  /* console.log('SQL Ejecutada:', sql);
+  console.log('Parámetros:', params); */
 
   try {
     const data = await db.query(sql, params);
