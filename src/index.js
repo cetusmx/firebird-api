@@ -1377,6 +1377,10 @@ app.get('/clavesalternas/buscar', async (req, res) => {
 });
 
 app.post('/clavesalternas/auditoria-margenes1', async (req, res) => {
+  // LOG 1: Visualizar el payload que llega del frontend
+  console.log('--- Nueva petición a /auditoria-margenes1 ---');
+  console.log('Payload recibido:', JSON.stringify(req.body, null, 2));
+
   const { fechaInicio, fechaFin, almacen, cliente, vendedor } = req.body;
 
   // Lógica para determinar el rango de fechas
@@ -1429,6 +1433,10 @@ app.post('/clavesalternas/auditoria-margenes1', async (req, res) => {
 
   sql += ` ORDER BY M.FECHAELAB ASC `;
 
+  // LOG 2: Verificar la SQL final y sus parámetros
+  console.log('SQL Ejecutada:', sql);
+  console.log('Parámetros:', params);
+  
   try {
     const data = await db.query(sql, params);
     
