@@ -819,7 +819,8 @@ app.get('/clavesalternas/search2', async (req, res) => {
 });
 
 app.get('/clavesalternas/search3', async (req, res) => {
-  const { q, sucursal } = req.query; // q: término de búsqueda, sucursal: para el precio
+  const q = req.query.q || req.query.query; 
+  const sucursal = req.query.sucursal || req.query.SUCURSAL;
 
   if (!q || q.length < 2) {
     return res.json([]);
