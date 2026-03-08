@@ -895,7 +895,7 @@ app.get('/clavesalternas/search3', async (req, res) => {
         existencias: existenciasObj
       };
     }));
-
+    console.log(resultadoFinal);
     res.json(resultadoFinal);
 
   } catch (error) {
