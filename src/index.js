@@ -852,7 +852,7 @@ app.get('/clavesalternas/search3', async (req, res) => {
 
   try {
     const productos = await db.query(sql, [queryTerm, queryTerm, queryTerm, queryTerm]);
-
+    console.log("Productoss: ",productos);
     // Usamos tus funciones de enriquecimiento tal cual están en tu index.js
     // 1. Enriquecer con Precios (Línea 1056 aprox)
     let productosConPrecios = await enrichWithPrecios(productos);
