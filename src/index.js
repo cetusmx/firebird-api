@@ -818,6 +818,92 @@ app.get('/clavesalternas/search2', async (req, res) => {
   }
 });
 
+app.get('/clavesalternas/search3', async (req, res) => {
+  const { q, sucursal } = req.query; // q: término de búsqueda, sucursal: para el precio
+
+  if (!q || q.length < 2) {
+    return res.json([]);
+  }
+
+  const queryTerm = `%${q.toUpperCase()}%`;
+  
+  // 1. Consulta SQL con la lógica de filtrado de /search
+  // Pero seleccionando todos los campos de /catalogo
+  const sql = `
+    SELECT DISTINCT FIRST 20
+      I.CVE_ART, I.DESCR, I.UNI_MED, I.LIN_PROD, I.COSTO_PROM, I.ULT_COSTO, I.FCH_ULTCOM, I.ULT_PROV,
+      C.CAMPLIB1 AS DIAM_INT, C.CAMPLIB2 AS DIAM_EXT, C.CAMPLIB3 AS ALTURA,
+      C.CAMPLIB7 AS SECCION, C.CAMPLIB13 AS PERFIL, C.CAMPLIB17 AS SIST_MED,
+      C.CAMPLIB19 AS DESC_ECOMM, C.CAMPLIB21 AS GENERO, C.CAMPLIB22 AS FAMILIA,
+      C.CAMPLIB24 AS CAT_ECOMM, C.CAMPLIB28 AS COLOCACION, 
+      C.CAMPLIB15 AS CLA_SYR, C.CAMPLIB16 AS CLA_LC
+    FROM INVE02 I
+    LEFT JOIN INVE_CLIB02 C ON I.CVE_ART = C.CVE_PROD
+    LEFT JOIN CUENT_AL02 A ON I.CVE_ART = A.CVE_ART
+    WHERE I.STATUS = 'A' 
+      AND (
+        UPPER(I.CVE_ART) LIKE ? OR 
+        UPPER(I.DESCR) LIKE ? OR 
+        UPPER(A.CVE_ALTER) LIKE ? OR 
+        UPPER(C.CAMPLIB19) LIKE ?
+      )
+  `;
+
+  try {
+    const productos = await db.query(sql, [queryTerm, queryTerm, queryTerm, queryTerm]);
+
+    // 2. Enriquecer cada producto con existencias y precios (Lógica de Catalogo)
+    const resultadoFinal = await Promise.all(productos.map(async (prod) => {
+      const clave = prod.CVE_ART.trim();
+
+      // Obtener existencias detalladas de MULT02
+      const sqlExist = `
+        SELECT M.CVE_ALM, A.DESCR AS NOMBRE_ALM, M.EXIST 
+        FROM MULT02 M 
+        JOIN ALMACENES02 A ON M.CVE_ALM = A.CVE_ALM 
+        WHERE M.CVE_ART = ?`;
+      const existData = await db.query(sqlExist, [clave]);
+      
+      // Formatear existencias como objeto (Durango, Zacatecas, etc.)
+      const existenciasObj = {};
+      existData.forEach(e => {
+        existenciasObj[e.NOMBRE_ALM.trim()] = e.EXIST;
+      });
+
+      // Obtener existencia en Almacén 10 (db3)
+      let alm10 = 0;
+      try {
+        const res10 = await db3.query('SELECT EXIST FROM MULT02 WHERE CVE_ART = ? AND CVE_ALM = 10', [clave]);
+        alm10 = res10[0]?.EXIST || 0;
+      } catch (e) { console.error("Error db3:", e.message); }
+
+      // Obtener precio según sucursal (si se proporcionó)
+      // Nota: Aquí asumo la lógica de tu tabla de precios por almacén
+      let precioVenta = 0;
+      if (sucursal) {
+        const sqlPrecio = `SELECT PRECIO FROM PRECIOS_X_ALMACEN WHERE CVE_ART = ? AND ALMACEN = ?`;
+        const resPrecio = await db.query(sqlPrecio, [clave, sucursal]);
+        precioVenta = resPrecio[0]?.PRECIO || 0;
+      }
+
+      return {
+        ...prod,
+        CVE_ART: clave,
+        DESCR: prod.DESCR.trim(),
+        PRECIO: precioVenta,
+        ALM_10_EXIST: alm10,
+        existencias: existenciasObj
+      };
+    }));
+
+    res.json(resultadoFinal);
+
+  } catch (error) {
+    console.error('Error en /search3:', error);
+    res.status(500).json({ error: 'Error en la búsqueda avanzada.' });
+  }
+});
+
 
 app.get('/clavesalternas/filter-ranges', async (req, res) => {
   const { 
