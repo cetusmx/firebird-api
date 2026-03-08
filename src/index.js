@@ -831,7 +831,7 @@ app.get('/clavesalternas/search3', async (req, res) => {
   // 1. Consulta SQL con la lógica de filtrado de /search
   // Pero seleccionando todos los campos de /catalogo
   const sql = `
-    SELECT DISTINCT FIRST 20
+    SELECT FIRST 20 DISTINCT
       I.CVE_ART, I.DESCR, I.UNI_MED, I.LIN_PROD, I.COSTO_PROM, I.ULT_COSTO, I.FCH_ULTCOM, I.ULT_PROV,
       C.CAMPLIB1 AS DIAM_INT, C.CAMPLIB2 AS DIAM_EXT, C.CAMPLIB3 AS ALTURA,
       C.CAMPLIB7 AS SECCION, C.CAMPLIB13 AS PERFIL, C.CAMPLIB17 AS SIST_MED,
