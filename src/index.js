@@ -832,7 +832,8 @@ app.get('/clavesalternas/search3', async (req, res) => {
   // Pero seleccionando los campos técnicos que requiere /catalogo
   const sql = `
     SELECT FIRST 20 DISTINCT
-      I.CVE_ART, I.DESCR, I.UNI_MED, I.LIN_PROD, I.COSTO_PROM, I.ULT_COSTO, I.FCH_ULTCOM, I.ULT_PROV,
+      I.CVE_ART, I.DESCR, I.UNI_MED, I.LIN_PROD, 
+      I.COSTO_PROM, I.ULT_COSTO, I.FCH_ULTCOM,
       C.CAMPLIB1 AS DIAM_INT, C.CAMPLIB2 AS DIAM_EXT, C.CAMPLIB3 AS ALTURA,
       C.CAMPLIB7 AS SECCION, C.CAMPLIB13 AS PERFIL, C.CAMPLIB17 AS SIST_MED,
       C.CAMPLIB19 AS DESC_ECOMM, C.CAMPLIB21 AS GENERO, C.CAMPLIB22 AS FAMILIA,
@@ -1066,7 +1067,8 @@ app.get('/clavesalternas/filter', async (req, res) => {
   }
 
   const whereString = `WHERE ${whereClauses.join(' AND ')}`;
-
+  console.log(whereString);
+  
   try {
     const countSql = `SELECT COUNT(DISTINCT T1.CVE_ART) AS TOTAL FROM INVE02 T1 LEFT JOIN INVE_CLIB02 T4 ON T1.CVE_ART = T4.CVE_PROD ${whereString}`;
     const countRes = await db.query(countSql, params);
