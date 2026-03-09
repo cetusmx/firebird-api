@@ -841,18 +841,15 @@ app.get('/clavesalternas/search3', async (req, res) => {
       C.CAMPLIB15 AS CLA_SYR, C.CAMPLIB16 AS CLA_LC
     FROM INVE02 I
     LEFT JOIN INVE_CLIB02 C ON I.CVE_ART = C.CVE_PROD
-    LEFT JOIN PRECIO_X_PROD02 P ON I.CVE_ART = P.CVE_ART
+    -- LEFT JOIN PRECIO_X_PROD02 P ON I.CVE_ART = P.CVE_ART
     WHERE I.STATUS = 'A' 
       AND (
-        UPPER(I.CVE_ART) LIKE ? OR 
-        UPPER(I.DESCR) LIKE ? OR 
-        UPPER(P.CVE_ALTER) LIKE ? OR 
-        UPPER(C.CAMPLIB19) LIKE ?
+        UPPER(I.CVE_ART) LIKE ?
       )
   `;
 
   try {
-    const productos = await db.query(sql, [queryTerm, queryTerm, queryTerm, queryTerm]);
+    const productos = await db.query(sql, [queryTerm]);
     console.log("Productoss: ",productos);
     // Usamos tus funciones de enriquecimiento tal cual están en tu index.js
     // 1. Enriquecer con Precios (Línea 1056 aprox)
