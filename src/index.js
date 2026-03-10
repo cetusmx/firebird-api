@@ -858,6 +858,7 @@ app.get('/clavesalternas/search3', async (req, res) => {
     // 2. Enriquecer con Último Costo (Línea 1076 aprox)
     let productosCompletos = await enrichWithUltimoCosto(productosConPrecios);
 
+    console.log(productosCompletos);
     const resultadoFinal = await Promise.all(productosCompletos.map(async (prod) => {
       const clave = prod.CVE_ART.trim();
 
@@ -1064,7 +1065,6 @@ app.get('/clavesalternas/filter', async (req, res) => {
   }
 
   const whereString = `WHERE ${whereClauses.join(' AND ')}`;
-  console.log(whereString);
   
   try {
     const countSql = `SELECT COUNT(DISTINCT T1.CVE_ART) AS TOTAL FROM INVE02 T1 LEFT JOIN INVE_CLIB02 T4 ON T1.CVE_ART = T4.CVE_PROD ${whereString}`;
