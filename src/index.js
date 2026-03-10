@@ -867,16 +867,16 @@ app.get('/clavesalternas/search3', async (req, res) => {
     let productosCompletos = await enrichWithUltimoCosto(productosConPrecios);
 
     //Se agrega la existencia de ALM 3 (ROSA QUEZADA)
-    if (productosCompletos.length > 0) {
+    /* if (productosCompletos.length > 0) {
       const ids = productosCompletos.map(item => item.CVE_ART.trim());
       const sql3 = `SELECT TRIM(CVE_ART) AS ART, EXIST FROM MULT03 WHERE CVE_ALM = 3 AND CVE_ART IN (${ids.map(() => '?').join(',')})`;
       const res3 = await db3.query(sql3, ids);
       const map3 = {};
       res3.forEach(r => map3[r.ART] = r.EXIST);
       productosCompletos = productosCompletos.map(item => ({ ...item, ALM_3_EXIST: map3[item.CVE_ART.trim()] || 0 }));
-    }
+    } */
 
-    /* if (productosCompletos.length > 0) {
+    if (productosCompletos.length > 0) {
       const articulosIds = productosCompletos.map(item => item.CVE_ART.trim());
       const sqlEmp3 = `SELECT TRIM(CVE_ART) AS ART, EXIST FROM MULT03 WHERE CVE_ALM = 3 AND CVE_ART IN (${articulosIds.map(() => '?').join(',')})`;
 
@@ -892,11 +892,11 @@ app.get('/clavesalternas/search3', async (req, res) => {
       } catch (err3) {
         productosCompletos = productosCompletos.map(item => ({ ...item, ALM_10_EXIST: 0 }));
       }
-    } */
+    }
 
     productosCompletos = processExistencias(productosCompletos);
 
-     console.log(productosCompletos);
+    //console.log(productosCompletos);
 
     res.json(productosCompletos);
 
