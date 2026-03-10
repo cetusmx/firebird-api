@@ -858,6 +858,7 @@ app.get('/clavesalternas/search3', async (req, res) => {
     // 2. Enriquecer con Último Costo (Línea 1076 aprox)
     let productosCompletos = await enrichWithUltimoCosto(productosConPrecios);
 
+    //Se agrega la existencia de ALM 3 (ROSA QUEZADA)
     if (productosCompletos.length > 0) {
       const ids = productosCompletos.map(item => item.CVE_ART.trim());
       const sql3 = `SELECT TRIM(CVE_ART) AS ART, EXIST FROM MULT03 WHERE CVE_ALM = 3 AND CVE_ART IN (${ids.map(() => '?').join(',')})`;
@@ -889,6 +890,8 @@ app.get('/clavesalternas/search3', async (req, res) => {
       }
     }
 
+    productosCompletos = processExistencias(productosCompletos);
+    
      console.log(productosCompletos);
 
     res.json(productosCompletos);
