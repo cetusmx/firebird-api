@@ -850,7 +850,7 @@ app.get('/clavesalternas/search3', async (req, res) => {
 
   try {
     const productos = await db.query(sql, [queryTerm]);
-    console.log("Productoss: ",productos);
+    //console.log("Productoss: ",productos);
     // Usamos tus funciones de enriquecimiento tal cual están en tu index.js
     // 1. Enriquecer con Precios (Línea 1056 aprox)
     let productosConPrecios = await enrichWithPrecios(productos);
@@ -858,48 +858,17 @@ app.get('/clavesalternas/search3', async (req, res) => {
     // 2. Enriquecer con Último Costo (Línea 1076 aprox)
     let productosCompletos = await enrichWithUltimoCosto(productosConPrecios);
 
-    console.log(productosCompletos);
-    const resultadoFinal = await Promise.all(productosCompletos.map(async (prod) => {
-      const clave = prod.CVE_ART.trim();
+    if (productosCompletos.length > 0) {
+      const ids = productosCompletos.map(item => item.CVE_ART.trim());
+      const sql3 = `SELECT TRIM(CVE_ART) AS ART, EXIST FROM MULT03 WHERE CVE_ALM = 3 AND CVE_ART IN (${ids.map(() => '?').join(',')})`;
+      const res3 = await db3.query(sql3, ids);
+      const map3 = {};
+      res3.forEach(r => map3[r.ART] = r.EXIST);
+      productosCompletos = productosCompletos.map(item => ({ ...item, ALM_10_EXIST: map3[item.CVE_ART.trim()] || 0 }));
+    }
+     console.log(productosCompletos);
 
-      // Existencias de MULT02 (sucursales locales)
-      let existenciasObj = {};
-      try {
-        const existData = await db.query(`
-          SELECT M.CVE_ALM, A.DESCR AS NOMBRE_ALM, M.EXIST 
-          FROM MULT02 M 
-          JOIN ALMACENES02 A ON M.CVE_ALM = A.CVE_ALM 
-          WHERE M.CVE_ART = ?`, [clave]);
-        existData.forEach(e => {
-          existenciasObj[(e.NOMBRE_ALM || '').trim()] = e.EXIST;
-        });
-      } catch (e) { console.error("Error MULT02:", e.message); }
-
-      // Existencia Almacén 10 (db3)
-      let alm10 = 0;
-      try {
-        const res10 = await db3.query('SELECT EXIST FROM MULT02 WHERE CVE_ART = ? AND CVE_ALM = 10', [clave]);
-        alm10 = res10[0]?.EXIST || 0;
-      } catch (e) { }
-
-      // Existencia Almacén 3 desde MULT03 como indicaste
-      let alm3 = 0;
-      try {
-        const res3 = await db.query('SELECT EXIST FROM MULT03 WHERE CVE_ART = ? AND CVE_ALM = 3', [clave]);
-        alm3 = res3[0]?.EXIST || 0;
-      } catch (e) { }
-
-      return {
-        ...prod,
-        CVE_ART: clave,
-        DESCR: (prod.DESCR || '').trim(),
-        ALM_10_EXIST: alm10,
-        ALM_3_EXIST: alm3,
-        existencias: existenciasObj
-      };
-    }));
-
-    res.json(resultadoFinal);
+    res.json(productosCompletos);
 
   } catch (error) {
     console.error('Error en /search3:', error.message);
