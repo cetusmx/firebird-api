@@ -864,8 +864,31 @@ app.get('/clavesalternas/search3', async (req, res) => {
       const res3 = await db3.query(sql3, ids);
       const map3 = {};
       res3.forEach(r => map3[r.ART] = r.EXIST);
-      productosCompletos = productosCompletos.map(item => ({ ...item, ALM_10_EXIST: map3[item.CVE_ART.trim()] || 0 }));
+      productosCompletos = productosCompletos.map(item => ({ ...item, ALM_3_EXIST: map3[item.CVE_ART.trim()] || 0 }));
     }
+
+    if (productosCompletos.length > 0) {
+      const articulosIds = productosCompletos.map(item => item.CVE_ART.trim());
+      const sqlEmp3 = `
+                SELECT TRIM(CVE_ART) AS ART, EXIST 
+                FROM MULT03 
+                WHERE CVE_ALM = 3 AND CVE_ART IN (${articulosIds.map(() => '?').join(',')})
+            `;
+
+      try {
+        const resEmp3 = await db3.query(sqlEmp3, articulosIds);
+        const existenciaEmp3Map = {};
+        resEmp3.forEach(row => { existenciaEmp3Map[row.ART] = row.EXIST; });
+
+        productosCompletos = productosCompletos.map(item => ({
+          ...item,
+          ALM_10_EXIST: existenciaEmp3Map[item.CVE_ART.trim()] || 0
+        }));
+      } catch (err3) {
+        productosCompletos = productosCompletos.map(item => ({ ...item, ALM_10_EXIST: 0 }));
+      }
+    }
+
      console.log(productosCompletos);
 
     res.json(productosCompletos);
