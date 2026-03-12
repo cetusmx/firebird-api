@@ -219,6 +219,49 @@ async function enrichWithPrecios(data, sucursal, listaPrecios) {
   }
 }
 
+/**
+ * Obtiene el último proveedor al que compró el almacén Querétaro (Almacén 7)
+ * para cada artículo en el conjunto de datos.
+ */
+async function enrichWithUltimoProveedorQro(data) {
+  if (!data || data.length === 0) return data;
+
+  const ids = data.map(item => item.CVE_ART.trim());
+  const placeholders = ids.map(() => '?').join(',');
+
+  // Consulta para obtener el movimiento más reciente (FECHA_DOCU DESC) 
+  // en el almacén 7 (Querétaro) con concepto 1 (Compras)
+  const sql = `
+    SELECT CVE_ART, CLAVE_CLPV, FECHA_DOCU
+    FROM MINVE02
+    WHERE ALMACEN = 7 
+      AND CVE_CPTO = 1 
+      AND CVE_ART IN (${placeholders})
+    ORDER BY FECHA_DOCU DESC
+  `;
+
+  try {
+    const movimientos = await db.query(sql, ids);
+
+    // Mapa para asegurar que solo tomamos el registro más reciente por artículo
+    const provMap = {};
+    movimientos.forEach(m => {
+      const art = m.CVE_ART.trim();
+      if (!provMap[art]) {
+        provMap[art] = m.CLAVE_CLPV ? m.CLAVE_CLPV.trim() : '';
+      }
+    });
+
+    return data.map(item => ({
+      ...item,
+      ULT_PROV_QRO: provMap[item.CVE_ART.trim()] || ''
+    }));
+  } catch (error) {
+    console.error("Error en enrichWithUltimoProveedorQro:", error.message);
+    return data.map(item => ({ ...item, ULT_PROV_QRO: '' }));
+  }
+}
+
 
 // Endpoint de prueba
 app.get('/', (req, res) => {
@@ -991,6 +1034,7 @@ app.get('/clavesalternas/filter-ranges', async (req, res) => {
     let dataResult = await db.query(dataSql, params);
     dataResult = await enrichWithPrecios(dataResult, SUCURSAL, lista_precios);
     dataResult = await enrichWithUltimoCosto(dataResult);
+    dataResult = await enrichWithUltimoProveedorQro(dataResult);  //se agrega último proveedor para ver si es el 46
 
     if (dataResult.length > 0) {
       const ids = dataResult.map(item => item.CVE_ART.trim());
@@ -1095,6 +1139,7 @@ app.get('/clavesalternas/filter', async (req, res) => {
     let dataResult = await db.query(sql, params);
     dataResult = await enrichWithPrecios(dataResult, SUCURSAL, lista_precios);
     dataResult = await enrichWithUltimoCosto(dataResult);
+    dataResult = await enrichWithUltimoProveedorQro(dataResult);  //se agrega último proveedor para ver si es el 46
 
     if (dataResult.length > 0) {
       const ids = dataResult.map(item => item.CVE_ART.trim());
