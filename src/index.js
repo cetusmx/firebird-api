@@ -223,7 +223,7 @@ async function enrichWithPrecios(data, sucursal, listaPrecios) {
  * Obtiene el último proveedor al que compró el almacén Querétaro (Almacén 7)
  * para cada artículo en el conjunto de datos.
  */
-async function enrichWithUltimoProveedorQro(data) {
+/* async function enrichWithUltimoProveedorQro(data) {
   if (!data || data.length === 0) return data;
 
   const ids = data.map(item => item.CVE_ART.trim());
@@ -258,6 +258,52 @@ async function enrichWithUltimoProveedorQro(data) {
     }));
   } catch (error) {
     console.error("Error en enrichWithUltimoProveedorQro:", error.message);
+    return data.map(item => ({ ...item, ULT_PROV_QRO: '' }));
+  }
+} */
+
+  async function enrichWithUltimoProveedorQro(data) {
+  if (!data || data.length === 0) return data;
+
+  // Limpiamos los IDs y eliminamos duplicados para reducir el tamaño de la consulta
+  const ids = [...new Set(data.map(item => item.CVE_ART.trim()).filter(id => id !== ''))];
+  
+  if (ids.length === 0) return data;
+
+  const placeholders = ids.map(() => '?').join(',');
+
+  // Especificamos el orden y las condiciones exactas
+  // Usamos el alias M para evitar problemas de truncamiento en la comparación
+  const sql = `
+    SELECT M.CVE_ART, M.CLAVE_CLPV, M.FECHA_DOCU
+    FROM MINVE02 M
+    WHERE M.ALMACEN = 7 
+      AND M.CVE_CPTO = 1 
+      AND M.CVE_ART IN (${placeholders})
+    ORDER BY M.FECHA_DOCU DESC
+  `;
+
+  try {
+    const movimientos = await db.query(sql, ids);
+
+    const provMap = {};
+    if (movimientos && movimientos.length > 0) {
+      movimientos.forEach(m => {
+        const art = m.CVE_ART.trim();
+        // Al estar ordenado DESC por fecha, el primero que procesamos es el más reciente
+        if (!provMap[art]) {
+          provMap[art] = m.CLAVE_CLPV ? m.CLAVE_CLPV.trim() : '';
+        }
+      });
+    }
+
+    return data.map(item => ({
+      ...item,
+      ULT_PROV_QRO: provMap[item.CVE_ART.trim()] || ''
+    }));
+  } catch (error) {
+    console.error("Error en enrichWithUltimoProveedorQro:", error.message);
+    // Devolvemos los datos originales para no romper el flujo del endpoint
     return data.map(item => ({ ...item, ULT_PROV_QRO: '' }));
   }
 }
