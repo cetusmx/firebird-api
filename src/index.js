@@ -908,6 +908,7 @@ app.get('/clavesalternas/search3', async (req, res) => {
     
     // 2. Enriquecer con Último Costo (Línea 1076 aprox)
     let productosCompletos = await enrichWithUltimoCosto(productosConPrecios);
+    productosCompletos = await enrichWithUltimoProveedorQro(productosCompletos);  //se agrega último proveedor para ver si es el 46
 
     //Se agrega la existencia de ALM 3 (ROSA QUEZADA)
     /* if (productosCompletos.length > 0) {
