@@ -265,21 +265,22 @@ async function enrichWithPrecios(data, sucursal, listaPrecios) {
   async function enrichWithUltimoProveedorQro(data) {
   if (!data || data.length === 0) return data;
 
-  // Limpiamos los IDs y eliminamos duplicados para reducir el tamaño de la consulta
-  const ids = [...new Set(data.map(item => item.CVE_ART.trim()).filter(id => id !== ''))];
+  // Limpiamos IDs y recortamos estrictamente a 16 caracteres
+  const ids = [...new Set(data.map(item => 
+    item.CVE_ART.trim().substring(0, 16)
+  ).filter(id => id !== ''))];
   
   if (ids.length === 0) return data;
 
   const placeholders = ids.map(() => '?').join(',');
 
-  // Especificamos el orden y las condiciones exactas
-  // Usamos el alias M para evitar problemas de truncamiento en la comparación
+  // Forzamos el CAST a VARCHAR(16) para asegurar compatibilidad total con el índice
   const sql = `
     SELECT M.CVE_ART, M.CLAVE_CLPV, M.FECHA_DOCU
     FROM MINVE02 M
     WHERE M.ALMACEN = 7 
       AND M.CVE_CPTO = 1 
-      AND M.CVE_ART IN (${placeholders})
+      AND CAST(M.CVE_ART AS VARCHAR(16)) IN (${placeholders})
     ORDER BY M.FECHA_DOCU DESC
   `;
 
@@ -290,7 +291,6 @@ async function enrichWithPrecios(data, sucursal, listaPrecios) {
     if (movimientos && movimientos.length > 0) {
       movimientos.forEach(m => {
         const art = m.CVE_ART.trim();
-        // Al estar ordenado DESC por fecha, el primero que procesamos es el más reciente
         if (!provMap[art]) {
           provMap[art] = m.CLAVE_CLPV ? m.CLAVE_CLPV.trim() : '';
         }
@@ -303,11 +303,9 @@ async function enrichWithPrecios(data, sucursal, listaPrecios) {
     }));
   } catch (error) {
     console.error("Error en enrichWithUltimoProveedorQro:", error.message);
-    // Devolvemos los datos originales para no romper el flujo del endpoint
     return data.map(item => ({ ...item, ULT_PROV_QRO: '' }));
   }
 }
-
 
 // Endpoint de prueba
 app.get('/', (req, res) => {
