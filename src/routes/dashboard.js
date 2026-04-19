@@ -1,9 +1,8 @@
 const express = require('express');
 const router = express.Router();
-const db = require('../db');   // Base de datos Principal (Empresa 2)
-const db3 = require('../db3'); // Base de datos Fresnillo (Empresa 3)
+const db = require('../db');
+const db3 = require('../db3');
 
-// Mapeo oficial de tu index.js
 const ALMACENES_MAP = {
     '1': 'Durango',
     '5': 'Mazatlán',
@@ -12,17 +11,15 @@ const ALMACENES_MAP = {
     '10': 'Fresnillo'
 };
 
-/**
- * GET /api/dashboard/ventas-resumen
- * Filtros opcionales: ?mes=3&anio=2026
- */
+// Función auxiliar para redondear a 2 decimales y evitar los .0000000001
+const round2 = (num) => Math.round((num + Number.EPSILON) * 100) / 100;
+
 router.get('/ventas-resumen', async (req, res) => {
     const now = new Date();
     const mes = parseInt(req.query.mes) || (now.getMonth() + 1);
     const anio = parseInt(req.query.anio) || now.getFullYear();
 
     try {
-        // --- QUERIES PARA EMPRESA 2 (Principal) ---
         const sqlFacturas2 = `
             SELECT NUM_ALMA, SUM(CAN_TOT) as TOTAL 
             FROM FACTF02 
@@ -31,16 +28,17 @@ router.get('/ventas-resumen', async (req, res) => {
             AND EXTRACT(YEAR FROM FECHA_DOC) = ?
             GROUP BY NUM_ALMA`;
 
+        // CORRECCIÓN: Usamos COALESCE para que si TIP_DOC_SIG es NULL, no ignore la remisión
         const sqlRemisiones2 = `
             SELECT NUM_ALMA, SUM(CAN_TOT) as TOTAL 
             FROM FACTR02 
-            WHERE TIP_DOC = 'R' AND TIP_DOC_SIG <> 'F' AND STATUS <> 'C'
+            WHERE TIP_DOC = 'R' 
+            AND STATUS <> 'C' 
+            AND (COALESCE(TIP_DOC_SIG, '') <> 'F')
             AND EXTRACT(MONTH FROM FECHA_DOC) = ? 
             AND EXTRACT(YEAR FROM FECHA_DOC) = ?
             GROUP BY NUM_ALMA`;
 
-        // --- QUERIES PARA EMPRESA 3 (Fresnillo) ---
-        // Nota: Se usan las tablas terminadas en 03
         const sqlFacturas3 = `
             SELECT SUM(CAN_TOT) as TOTAL 
             FROM FACTF03 
@@ -51,19 +49,19 @@ router.get('/ventas-resumen', async (req, res) => {
         const sqlRemisiones3 = `
             SELECT SUM(CAN_TOT) as TOTAL 
             FROM FACTR03 
-            WHERE TIP_DOC = 'R' AND TIP_DOC_SIG <> 'F' AND STATUS <> 'C'
+            WHERE TIP_DOC = 'R' 
+            AND STATUS <> 'C' 
+            AND (COALESCE(TIP_DOC_SIG, '') <> 'F')
             AND EXTRACT(MONTH FROM FECHA_DOC) = ? 
             AND EXTRACT(YEAR FROM FECHA_DOC) = ?`;
 
-        // Ejecución en paralelo siguiendo el patrón de tu search
         const [f2, r2, f3, r3] = await Promise.all([
             db.query(sqlFacturas2, [mes, anio]),
-            db.query(sqlRemisiones2, [mes, anio]),
+            db.query(r2_sql = sqlRemisiones2, [mes, anio]), // Asignación para debug interno si fuera necesario
             db3.query(sqlFacturas3, [mes, anio]),
             db3.query(sqlRemisiones3, [mes, anio])
         ]);
 
-        // Estructura de respuesta inicializada con los almacenes conocidos
         const reporteSucursales = {};
         Object.keys(ALMACENES_MAP).forEach(id => {
             reporteSucursales[id] = {
@@ -75,49 +73,50 @@ router.get('/ventas-resumen', async (req, res) => {
             };
         });
 
-        // Procesar Facturas Empresa 2
+        // Procesar Facturas Principal
         f2.forEach(row => {
             if (reporteSucursales[row.NUM_ALMA]) {
-                reporteSucursales[row.NUM_ALMA].ventas_facturadas += row.TOTAL;
-                reporteSucursales[row.NUM_ALMA].total += row.TOTAL;
+                reporteSucursales[row.NUM_ALMA].ventas_facturadas = round2(row.TOTAL);
             }
         });
 
-        // Procesar Remisiones Empresa 2
+        // Procesar Remisiones Principal
         r2.forEach(row => {
             if (reporteSucursales[row.NUM_ALMA]) {
-                reporteSucursales[row.NUM_ALMA].ventas_remisiones += row.TOTAL;
-                reporteSucursales[row.NUM_ALMA].total += row.TOTAL;
+                reporteSucursales[row.NUM_ALMA].ventas_remisiones = round2(row.TOTAL);
             }
         });
 
-        // Procesar Empresa 3 (Fresnillo - ID 10)
-        // Como es una base de datos dedicada, sumamos el total directo al almacén 10
+        // Procesar Fresnillo (Empresa 3 -> Almacén 10)
         if (f3 && f3[0] && f3[0].TOTAL) {
-            reporteSucursales['10'].ventas_facturadas += f3[0].TOTAL;
-            reporteSucursales['10'].total += f3[0].TOTAL;
+            reporteSucursales['10'].ventas_facturadas = round2(f3[0].TOTAL);
         }
         if (r3 && r3[0] && r3[0].TOTAL) {
-            reporteSucursales['10'].ventas_remisiones += r3[0].TOTAL;
-            reporteSucursales['10'].total += r3[0].TOTAL;
+            reporteSucursales['10'].ventas_remisiones = round2(r3[0].TOTAL);
         }
 
-        // Calcular Gran Total Global para el Pie general
-        const totalGlobal = Object.values(reporteSucursales).reduce((acc, suc) => {
-            acc.facturas += suc.ventas_facturadas;
-            acc.remisiones += suc.ventas_remisiones;
-            acc.total += suc.total;
-            return acc;
-        }, { facturas: 0, remisiones: 0, total: 0 });
+        // Calcular Totales Finales por sucursal y Gran Total
+        let globalFacturas = 0;
+        let globalRemisiones = 0;
+
+        Object.values(reporteSucursales).forEach(suc => {
+            suc.total = round2(suc.ventas_facturadas + suc.ventas_remisiones);
+            globalFacturas += suc.ventas_facturadas;
+            globalRemisiones += suc.ventas_remisiones;
+        });
 
         res.json({
             periodo: { mes, anio },
-            resumen_global: totalGlobal,
+            resumen_global: {
+                facturas: round2(globalFacturas),
+                remisiones: round2(globalRemisiones),
+                total: round2(globalFacturas + globalRemisiones)
+            },
             detalle_sucursales: Object.values(reporteSucursales)
         });
 
     } catch (error) {
-        console.error("Error en Dashboard de Ventas:", error.message);
+        console.error("Error en Dashboard:", error.message);
         res.status(500).json({ error: "Error al procesar el dashboard", detalle: error.message });
     }
 });
