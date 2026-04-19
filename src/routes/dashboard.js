@@ -20,12 +20,12 @@ router.get('/ventas-resumen', async (req, res) => {
 
     try {
         // --- QUERIES EMPRESA 02 (Principal) ---
-        // Excluir cliente 4239
+        // Usamos TRIM para eliminar espacios y asegurar la exclusión del cliente 4239
         const sqlFacturas2 = `
             SELECT NUM_ALMA, SUM(CAN_TOT) as TOTAL 
             FROM FACTF02 
             WHERE TIP_DOC = 'F' AND STATUS <> 'C' 
-            AND CVE_CLPV <> '4239'
+            AND TRIM(CVE_CLPV) <> '4239'
             AND EXTRACT(MONTH FROM FECHA_DOC) = ? 
             AND EXTRACT(YEAR FROM FECHA_DOC) = ?
             GROUP BY NUM_ALMA`;
@@ -34,19 +34,19 @@ router.get('/ventas-resumen', async (req, res) => {
             SELECT NUM_ALMA, SUM(CAN_TOT) as TOTAL 
             FROM FACTR02 
             WHERE TIP_DOC = 'R' AND STATUS <> 'C' 
-            AND CVE_CLPV <> '4239'
+            AND TRIM(CVE_CLPV) <> '4239'
             AND (COALESCE(TIP_DOC_SIG, '') <> 'F')
             AND EXTRACT(MONTH FROM FECHA_DOC) = ? 
             AND EXTRACT(YEAR FROM FECHA_DOC) = ?
             GROUP BY NUM_ALMA`;
 
         // --- QUERIES EMPRESA 03 (Fresnillo) ---
-        // Excluir cliente 2257
+        // Usamos TRIM para asegurar la exclusión del cliente 2257
         const sqlFacturas3 = `
             SELECT SUM(CAN_TOT) as TOTAL 
             FROM FACTF03 
             WHERE TIP_DOC = 'F' AND STATUS <> 'C' 
-            AND CVE_CLPV <> '2257'
+            AND TRIM(CVE_CLPV) <> '2257'
             AND EXTRACT(MONTH FROM FECHA_DOC) = ? 
             AND EXTRACT(YEAR FROM FECHA_DOC) = ?`;
 
@@ -54,7 +54,7 @@ router.get('/ventas-resumen', async (req, res) => {
             SELECT SUM(CAN_TOT) as TOTAL 
             FROM FACTR03 
             WHERE TIP_DOC = 'R' AND STATUS <> 'C' 
-            AND CVE_CLPV <> '2257'
+            AND TRIM(CVE_CLPV) <> '2257'
             AND (COALESCE(TIP_DOC_SIG, '') <> 'F')
             AND EXTRACT(MONTH FROM FECHA_DOC) = ? 
             AND EXTRACT(YEAR FROM FECHA_DOC) = ?`;
