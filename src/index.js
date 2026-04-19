@@ -5,6 +5,7 @@ const morgan = require('morgan');
 const db = require('./db');
 const db3 = require('./db3');
 const cors = require('cors');
+const dashboardRoutes = require('./routes/dashboard');
 
 const app = express();
 const port = process.env.API_PORT || 3010;
@@ -59,6 +60,7 @@ app.use(express.json());
 // 3. Logs detallados (Para ver quién entra y cuánto tarda)
 app.use(morgan(':localdate :remote-addr - :method :url :status :response-time ms'));
 
+app.use('/api/dashboard', dashboardRoutes);
 
 // Constantes de mapeo de almacenes (Sucursales)
 const ALMACENES = {
