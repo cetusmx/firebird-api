@@ -14,91 +14,89 @@ router.get('/cxc-resumen', async (req, res) => {
     const anio = parseInt(req.query.anio) || now.getFullYear();
 
     try {
-        // --- 1. SQL FACTURADO ---
-        const sqlFact2 = `SELECT SUM(IMPORTE) as TOTAL FROM FACTF02 WHERE TIP_DOC='F' AND STATUS<>'C' AND TRIM(CVE_CLPV)<>'4239' AND EXTRACT(MONTH FROM FECHA_DOC)=? AND EXTRACT(YEAR FROM FECHA_DOC)=?`;
-        const sqlFact3 = `SELECT SUM(IMPORTE) as TOTAL FROM FACTF03 WHERE TIP_DOC='F' AND STATUS<>'C' AND TRIM(CVE_CLPV)<>'2257' AND EXTRACT(MONTH FROM FECHA_DOC)=? AND EXTRACT(YEAR FROM FECHA_DOC)=?`;
+        // --- 1. TOTAL FACTURADO (Real - FACTF) ---
+        // Basado en FECHA_DOC
+        const sqlFact2 = `
+            SELECT SUM(IMPORTE) as TOTAL 
+            FROM FACTF02 
+            WHERE TIP_DOC = 'F' AND STATUS <> 'C' 
+            AND TRIM(CVE_CLPV) <> '4239'
+            AND EXTRACT(MONTH FROM FECHA_DOC) = ? 
+            AND EXTRACT(YEAR FROM FECHA_DOC) = ?`;
 
-        // --- 2. SQL COBRADO (Recibos de caja) ---
-        const sqlCobrado2 = `SELECT SUM(IMPORTE) as TOTAL FROM CUEN_DET02 WHERE CVE_CPTO > 1 AND TRIM(CVE_CLIE) <> '4239' AND EXTRACT(MONTH FROM FECHA_ELAB) = ? AND EXTRACT(YEAR FROM FECHA_ELAB) = ?`;
-        const sqlCobrado3 = `SELECT SUM(IMPORTE) as TOTAL FROM CUEN_DET03 WHERE CVE_CPTO > 1 AND TRIM(CVE_CLIE) <> '2257' AND EXTRACT(MONTH FROM FECHA_ELAB) = ? AND EXTRACT(YEAR FROM FECHA_ELAB) = ?`;
+        const sqlFact3 = `
+            SELECT SUM(IMPORTE) as TOTAL 
+            FROM FACTF03 
+            WHERE TIP_DOC = 'F' AND STATUS <> 'C' 
+            AND TRIM(CVE_CLPV) <> '2257'
+            AND EXTRACT(MONTH FROM FECHA_DOC) = ? 
+            AND EXTRACT(YEAR FROM FECHA_DOC) = ?`;
 
-        // --- 3. SQL ANTIGÜEDAD DE SALDOS (Consolidado) ---
-        const sqlAntiguedad = (tabla, clieExcluir) => `
-            SELECT 
-                CASE 
-                    WHEN FECHA_VENC >= CURRENT_DATE THEN 'Al corriente'
-                    WHEN DATEDIFF(day, FECHA_VENC, CURRENT_DATE) <= 30 THEN '1-30 días'
-                    WHEN DATEDIFF(day, FECHA_VENC, CURRENT_DATE) <= 60 THEN '31-60 días'
-                    WHEN DATEDIFF(day, FECHA_VENC, CURRENT_DATE) <= 90 THEN '61-90 días'
-                    ELSE '90+ días'
-                END as RANGO,
-                SUM(SALDO) as TOTAL
-            FROM ${tabla} 
-            WHERE SALDO > 0.01 AND TRIM(CVE_CLIE) <> '${clieExcluir}'
-            GROUP BY 1`;
+        // --- 2. TOTAL COBRADO (Real - CUEN_DET) ---
+        // Basado en FECHA_ELAB, sin filtros de concepto
+        const sqlCobrado2 = `
+            SELECT SUM(IMPORTE) as TOTAL 
+            FROM CUEN_DET02 
+            WHERE TRIM(CVE_CLIE) <> '4239'
+            AND EXTRACT(MONTH FROM FECHA_ELAB) = ? 
+            AND EXTRACT(YEAR FROM FECHA_ELAB) = ?`;
 
-        // --- 4. SQL TOP DEUDORES ---
-        const sqlTop = (tablaM, tablaC, clieExcluir) => `
-            SELECT TRIM(C.NOMBRE) as NOMBRE, SUM(M.SALDO) as MONTO
-            FROM ${tablaM} M
-            JOIN ${tablaC} C ON C.CLAVE = M.CVE_CLIE
-            WHERE M.SALDO > 0.01 AND TRIM(M.CVE_CLIE) <> '${clieExcluir}'
-            GROUP BY 1`;
+        const sqlCobrado3 = `
+            SELECT SUM(IMPORTE) as TOTAL 
+            FROM CUEN_DET03 
+            WHERE TRIM(CVE_CLIE) <> '2257'
+            AND EXTRACT(MONTH FROM FECHA_ELAB) = ? 
+            AND EXTRACT(YEAR FROM FECHA_ELAB) = ?`;
 
-        const [f2, f3, c2, c3, ant2, ant3, top2, top3] = await Promise.all([
+        // Ejecución de consultas reales
+        const [f2, f3, c2, c3] = await Promise.all([
             db.query(sqlFact2, [mes, anio]),
             db3.query(sqlFact3, [mes, anio]),
             db.query(sqlCobrado2, [mes, anio]),
-            db3.query(sqlCobrado3, [mes, anio]),
-            db.query(sqlAntiguedad('CUEN_M02', '4239')),
-            db3.query(sqlAntiguedad('CUEN_M03', '2257')),
-            db.query(sqlTop('CUEN_M02', 'CLIE02', '4239')),
-            db3.query(sqlTop('CUEN_M03', 'CLIE03', '2257'))
+            db3.query(sqlCobrado3, [mes, anio])
         ]);
 
-        const tFacturado = round2((f2[0]?.TOTAL || 0) + (f3[0]?.TOTAL || 0));
-        const tCobrado = round2((c2[0]?.TOTAL || 0) + (c3[0]?.TOTAL || 0));
-        const indice = tFacturado > 0 ? round2((tCobrado / tFacturado) * 100) : 0;
+        const totalFacturado = round2((f2[0]?.TOTAL || 0) + (f3[0]?.TOTAL || 0));
+        const totalCobrado = round2((c2[0]?.TOTAL || 0) + (c3[0]?.TOTAL || 0));
+        
+        // Cálculo del índice (Cobrado / Facturado * 100)
+        const indice = totalFacturado > 0 ? round2((totalCobrado / totalFacturado) * 100) : 0;
 
-        const rangosOrden = ['Al corriente', '1-30 días', '31-60 días', '61-90 días', '90+ días'];
-        const antiguedadMap = {};
-        rangosOrden.forEach(r => antiguedadMap[r] = 0);
+        // --- 3. DATOS FICTICIOS TEMPORALES ---
+        // Estos se reemplazarán cuando definamos el origen de los saldos
+        const antiguedad_ficticia = [
+            { "etiqueta": "Al corriente", "monto": 5000000 },
+            { "etiqueta": "30-60 días", "monto": 1200000 },
+            { "etiqueta": "60-90 días", "monto": 800000 },
+            { "etiqueta": "90+ días", "monto": 450000 }
+        ];
 
-        [...ant2, ...ant3].forEach(item => {
-            const r = item.RANGO.trim();
-            if (antiguedadMap[r] !== undefined) antiguedadMap[r] += item.TOTAL;
-        });
+        const deudores_ficticios = [
+            { "nombre": "CLIENTE FICTICIO A", "monto": 850000 },
+            { "nombre": "CLIENTE FICTICIO B", "monto": 620000 },
+            { "nombre": "CLIENTE FICTICIO C", "monto": 400000 },
+            { "nombre": "CLIENTE FICTICIO D", "monto": 310000 },
+            { "nombre": "CLIENTE FICTICIO E", "monto": 150000 }
+        ];
 
-        const antiguedadFinal = rangosOrden.map(r => ({
-            etiqueta: r,
-            monto: round2(antiguedadMap[r])
-        }));
-
-        const deudoresMap = {};
-        [...top2, ...top3].forEach(d => {
-            const nombre = d.NOMBRE.trim();
-            deudoresMap[nombre] = (deudoresMap[nombre] || 0) + d.MONTO;
-        });
-
-        const top10Deudores = Object.entries(deudoresMap)
-            .map(([nombre, monto]) => ({ nombre, monto: round2(monto) }))
-            .sort((a, b) => b.monto - a.monto)
-            .slice(0, 10);
-
+        // --- RESPUESTA ---
         res.json({
             periodo: { mes, anio },
             cobrabilidad: {
-                total_facturado: tFacturado,
-                total_cobrado: tCobrado,
+                total_facturado: totalFacturado,
+                total_cobrado: totalCobrado,
                 indice_cobrabilidad: indice
             },
-            antiguedad_saldos: antiguedadFinal,
-            top_deudores: top10Deudores
+            antiguedad_saldos: antiguedad_ficticia,
+            top_deudores: deudores_ficticios
         });
 
     } catch (error) {
-        console.error("Error en Cobranza:", error.message);
-        res.status(500).json({ error: "Error al procesar cobranza", detalle: error.message });
+        console.error("Error en CxC Resumen:", error.message);
+        res.status(500).json({ 
+            error: "Error al procesar cobranza", 
+            detalle: error.message 
+        });
     }
 });
 
