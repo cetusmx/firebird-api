@@ -14,8 +14,7 @@ router.get('/cxc-resumen', async (req, res) => {
     const anio = parseInt(req.query.anio) || now.getFullYear();
 
     try {
-        // --- 1. TOTAL FACTURADO (Real - FACTF) ---
-        // Basado en FECHA_DOC
+        // --- 1. TOTAL FACTURADO (FACTF) ---
         const sqlFact2 = `
             SELECT SUM(IMPORTE) as TOTAL 
             FROM FACTF02 
@@ -32,21 +31,21 @@ router.get('/cxc-resumen', async (req, res) => {
             AND EXTRACT(MONTH FROM FECHA_DOC) = ? 
             AND EXTRACT(YEAR FROM FECHA_DOC) = ?`;
 
-        // --- 2. TOTAL COBRADO (Real - CUEN_DET) ---
-        // Basado en FECHA_ELAB, sin filtros de concepto
+        // --- 2. TOTAL COBRADO (CUEN_DET) ---
+        // CORRECCIÓN: Se cambió FECHA_ELAB por FECHAELAB
         const sqlCobrado2 = `
             SELECT SUM(IMPORTE) as TOTAL 
             FROM CUEN_DET02 
             WHERE TRIM(CVE_CLIE) <> '4239'
-            AND EXTRACT(MONTH FROM FECHA_ELAB) = ? 
-            AND EXTRACT(YEAR FROM FECHA_ELAB) = ?`;
+            AND EXTRACT(MONTH FROM FECHAELAB) = ? 
+            AND EXTRACT(YEAR FROM FECHAELAB) = ?`;
 
         const sqlCobrado3 = `
             SELECT SUM(IMPORTE) as TOTAL 
             FROM CUEN_DET03 
             WHERE TRIM(CVE_CLIE) <> '2257'
-            AND EXTRACT(MONTH FROM FECHA_ELAB) = ? 
-            AND EXTRACT(YEAR FROM FECHA_ELAB) = ?`;
+            AND EXTRACT(MONTH FROM FECHAELAB) = ? 
+            AND EXTRACT(YEAR FROM FECHAELAB) = ?`;
 
         // Ejecución de consultas reales
         const [f2, f3, c2, c3] = await Promise.all([
@@ -59,11 +58,10 @@ router.get('/cxc-resumen', async (req, res) => {
         const totalFacturado = round2((f2[0]?.TOTAL || 0) + (f3[0]?.TOTAL || 0));
         const totalCobrado = round2((c2[0]?.TOTAL || 0) + (c3[0]?.TOTAL || 0));
         
-        // Cálculo del índice (Cobrado / Facturado * 100)
+        // Cálculo del índice
         const indice = totalFacturado > 0 ? round2((totalCobrado / totalFacturado) * 100) : 0;
 
         // --- 3. DATOS FICTICIOS TEMPORALES ---
-        // Estos se reemplazarán cuando definamos el origen de los saldos
         const antiguedad_ficticia = [
             { "etiqueta": "Al corriente", "monto": 5000000 },
             { "etiqueta": "30-60 días", "monto": 1200000 },
@@ -73,13 +71,9 @@ router.get('/cxc-resumen', async (req, res) => {
 
         const deudores_ficticios = [
             { "nombre": "CLIENTE FICTICIO A", "monto": 850000 },
-            { "nombre": "CLIENTE FICTICIO B", "monto": 620000 },
-            { "nombre": "CLIENTE FICTICIO C", "monto": 400000 },
-            { "nombre": "CLIENTE FICTICIO D", "monto": 310000 },
-            { "nombre": "CLIENTE FICTICIO E", "monto": 150000 }
+            { "nombre": "CLIENTE FICTICIO B", "monto": 620000 }
         ];
 
-        // --- RESPUESTA ---
         res.json({
             periodo: { mes, anio },
             cobrabilidad: {
