@@ -125,4 +125,115 @@ router.get('/ventas-resumen', async (req, res) => {
     }
 });
 
+/**
+ * GET /api/dashboard/ventas-tendencia
+ * Parámetros: ?rango=3|6|12|24 o ?anio=2026
+ */
+router.get('/ventas-tendencia', async (req, res) => {
+    const { rango, anio } = req.query;
+    const now = new Date();
+    
+    let fechaInicio, fechaFin;
+
+    // 1. Determinar el rango de fechas
+    if (anio) {
+        fechaInicio = `${anio}-01-01`;
+        fechaFin = `${anio}-12-31`;
+    } else {
+        const mesesARetrasar = parseInt(rango) || 3;
+        const inicio = new Date(now.getFullYear(), now.getMonth() - (mesesARetrasar - 1), 1);
+        fechaInicio = inicio.toISOString().split('T')[0];
+        fechaFin = new Date(now.getFullYear(), now.getMonth() + 1, 0).toISOString().split('T')[0];
+    }
+
+    try {
+        // Query base para Empresa 2 (Principal)
+        const sqlBase2 = (tabla) => `
+            SELECT 
+                EXTRACT(YEAR FROM FECHA_DOC) as ANIO,
+                EXTRACT(MONTH FROM FECHA_DOC) as MES,
+                NUM_ALMA,
+                SUM(CAN_TOT) as TOTAL
+            FROM ${tabla}
+            WHERE STATUS <> 'C' AND TRIM(CVE_CLPV) <> '4239'
+            AND FECHA_DOC BETWEEN '${fechaInicio}' AND '${fechaFin}'
+            ${tabla.includes('FACTR') ? "AND (COALESCE(TIP_DOC_SIG, '') <> 'F')" : ""}
+            GROUP BY 1, 2, 3
+            ORDER BY 1, 2`;
+
+        // Query base para Empresa 3 (Fresnillo)
+        const sqlBase3 = (tabla) => `
+            SELECT 
+                EXTRACT(YEAR FROM FECHA_DOC) as ANIO,
+                EXTRACT(MONTH FROM FECHA_DOC) as MES,
+                SUM(CAN_TOT) as TOTAL
+            FROM ${tabla}
+            WHERE STATUS <> 'C' AND TRIM(CVE_CLPV) <> '2257'
+            AND FECHA_DOC BETWEEN '${fechaInicio}' AND '${fechaFin}'
+            ${tabla.includes('FACTR') ? "AND (COALESCE(TIP_DOC_SIG, '') <> 'F')" : ""}
+            GROUP BY 1, 2
+            ORDER BY 1, 2`;
+
+        // Ejecución en paralelo
+        const [f2, r2, f3, r3] = await Promise.all([
+            db.query(sqlBase2('FACTF02')),
+            db.query(sqlBase2('FACTR02')),
+            db3.query(sqlBase3('FACTF03')),
+            db3.query(sqlBase3('FACTR03'))
+        ]);
+
+        // 2. Generar el esqueleto de meses para el rango solicitado
+        const mesesMap = {};
+        const listaMeses = [];
+        const nombresMeses = ["Ene", "Feb", "Mar", "Abr", "May", "Jun", "Jul", "Ago", "Sep", "Oct", "Nov", "Dic"];
+
+        let iterador = new Date(fechaInicio + 'T00:00:00');
+        const finCorte = new Date(fechaFin + 'T00:00:00');
+
+        while (iterador <= finCorte) {
+            const y = iterador.getFullYear();
+            const m = iterador.getMonth() + 1;
+            const key = `${y}-${String(m).padStart(2, '0')}`;
+            
+            const objMes = {
+                etiqueta: `${nombresMeses[m-1]} ${String(y).slice(-2)}`,
+                periodo: key
+            };
+            
+            // Inicializar todas las sucursales en 0
+            Object.values(ALMACENES_MAP).forEach(nombre => {
+                objMes[nombre] = 0;
+            });
+
+            mesesMap[key] = objMes;
+            listaMeses.push(key);
+            iterador.setMonth(iterador.getMonth() + 1);
+        }
+
+        // 3. Poblar datos de Empresa 2
+        [...f2, ...r2].forEach(row => {
+            const key = `${row.ANIO}-${String(row.MES).padStart(2, '0')}`;
+            const nombreSucursal = ALMACENES_MAP[row.NUM_ALMA];
+            if (mesesMap[key] && nombreSucursal) {
+                mesesMap[key][nombreSucursal] = round2(mesesMap[key][nombreSucursal] + row.TOTAL);
+            }
+        });
+
+        // 4. Poblar datos de Empresa 3 (Fresnillo)
+        [...f3, ...r3].forEach(row => {
+            const key = `${row.ANIO}-${String(row.MES).padStart(2, '0')}`;
+            if (mesesMap[key]) {
+                mesesMap[key]["Fresnillo"] = round2(mesesMap[key]["Fresnillo"] + row.TOTAL);
+            }
+        });
+
+        // Retornar solo los objetos en orden
+        res.json(listaMeses.map(k => mesesMap[k]));
+
+    } catch (error) {
+        console.error("Error en Tendencia:", error.message);
+        res.status(500).json({ error: "Error al generar tendencia", detalle: error.message });
+    }
+});
+
 module.exports = router;
