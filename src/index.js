@@ -6,6 +6,7 @@ const db = require('./db');
 const db3 = require('./db3');
 const cors = require('cors');
 const dashboardRoutes = require('./routes/dashboard');
+const dashboardCobranza = require('./routes/cobranza');
 
 const app = express();
 const port = process.env.API_PORT || 3010;
@@ -61,6 +62,8 @@ app.use(express.json());
 app.use(morgan(':localdate :remote-addr - :method :url :status :response-time ms'));
 
 app.use('/api/dashboard', dashboardRoutes);
+
+app.use('/api/dashboard', dashboardCobranza);
 
 // Constantes de mapeo de almacenes (Sucursales)
 const ALMACENES = {
