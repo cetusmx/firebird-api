@@ -110,4 +110,49 @@ router.get('/cxc-resumen', async (req, res) => {
     }
 });
 
+/**
+ * GET /api/dashboard/cxc-overview
+ * Proporciona el monto total consolidado de la cartera vencida (> 30 días).
+ */
+router.get('/cxc-overview', async (req, res) => {
+    try {
+        const sqlVencido = (sufijo, clieExcluir) => `
+            SELECT SUM(F.IMPORTE - COALESCE(P.PAGADO, 0)) as TOTAL_VENCIDO
+            FROM FACTF${sufijo} F
+            LEFT JOIN (
+                SELECT REFER, SUM(IMPORTE) as PAGADO 
+                FROM CUEN_DET${sufijo} 
+                GROUP BY REFER
+            ) P ON P.REFER = F.CVE_DOC
+            WHERE F.METODODEPAGO = 'PPD' 
+              AND F.STATUS <> 'C'
+              AND TRIM(F.CVE_CLPV) <> '${clieExcluir}'
+              AND DATEDIFF(day, F.FECHA_VEN, CURRENT_DATE) > 30
+              AND (F.IMPORTE - COALESCE(P.PAGADO, 0)) > 0.01`;
+
+        // Ejecución simultánea en ambas bases de datos
+        const [res2, res3] = await Promise.all([
+            db.query(sqlVencido('02', '4239')),
+            db3.query(sqlVencido('03', '2257'))
+        ]);
+
+        // Consolidación en una sola variable
+        const totalConsolidado = round2(
+            (res2[0]?.TOTAL_VENCIDO || 0) + (res3[0]?.TOTAL_VENCIDO || 0)
+        );
+
+        res.json({
+            total_vencido: totalConsolidado,
+            fecha_corte: new Date().toISOString()
+        });
+
+    } catch (error) {
+        console.error("Error en CxC Overview:", error.message);
+        res.status(500).json({ 
+            error: "Error al obtener resumen de cartera", 
+            detalle: error.message 
+        });
+    }
+});
+
 module.exports = router;
