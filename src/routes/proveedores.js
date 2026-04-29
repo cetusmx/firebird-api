@@ -22,7 +22,7 @@ async function resolverClave(idProveedor, claveProveedor) {
     }
 
     // 2. Si no se encontró, intentar en Claves Alternas (CVES_ALTER02)
-    const sqlAlt = `SELECT TRIM(CVE_ART) as CLAVE_INTERNA FROM CVES_ALTER02 WHERE CVE_CLPV = ? AND TRIM(CVE_ALTER) = ?`;
+    const sqlAlt = `SELECT TRIM(CVE_ART) as CLAVE_INTERNA FROM CVES_ALTER02 WHERE TRIM(CVE_CLPV) = ? AND TRIM(CVE_ALTER) = ?`;
     const resAlt = await db.query(sqlAlt, [idProveedor, claveProveedor]);
     if (resAlt.length > 0 && resAlt[0].CLAVE_INTERNA) {
         return { clave: resAlt[0].CLAVE_INTERNA, origen: "Clave alterna" };
