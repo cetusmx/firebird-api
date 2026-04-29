@@ -75,7 +75,7 @@ router.post('/getclavesprovee', async (req, res) => {
 /**
  * B. Consulta Unitaria (GET)
  */
-router.get('/getclavesproveedor', async (req, res) => {
+router.get('/getclavesprovee', async (req, res) => {
     const { rfc, clave_proveedor } = req.query;
 
     if (!rfc || !clave_proveedor) {
