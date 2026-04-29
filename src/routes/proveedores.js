@@ -72,14 +72,18 @@ router.post('/getclavesprovee', async (req, res) => {
     }
 });
 
-/**
- * B. Consulta Unitaria (GET)
+/* * B. Consulta Unitaria (GET)
+ * Soporta tanto 'clave' como 'clave_proveedor' para evitar errores 400
  */
 router.get('/getclavesprovee', async (req, res) => {
-    const { rfc, clave_proveedor } = req.query;
+    // Aceptamos ambos nombres de parámetro por flexibilidad
+    const rfc = req.query.rfc;
+    const clave_proveedor = req.query.clave_proveedor || req.query.clave;
 
     if (!rfc || !clave_proveedor) {
-        return res.status(400).json({ error: "rfc y clave_proveedor son requeridos" });
+        return res.status(400).json({ 
+            error: "rfc y clave_proveedor (o clave) son requeridos" 
+        });
     }
 
     try {
@@ -87,7 +91,7 @@ router.get('/getclavesprovee', async (req, res) => {
         const resProv = await db.query(sqlProv, [rfc]);
 
         if (resProv.length === 0) {
-            return res.status(404).json({ error: "Proveedor no encontrado" });
+            return res.status(404).json({ error: "Proveedor no encontrado con ese RFC" });
         }
 
         const idProv = resProv[0].ID_PROV;
@@ -101,7 +105,7 @@ router.get('/getclavesprovee', async (req, res) => {
 
     } catch (error) {
         console.error("Error en búsqueda unitaria:", error.message);
-        res.status(500).json({ error: "Error interno del servidor", detalle: error.message });
+        res.status(500).json({ error: "Error interno", detalle: error.message });
     }
 });
 
