@@ -8,6 +8,7 @@ const cors = require('cors');
 const dashboardRoutes = require('./routes/dashboard');
 const dashboardCobranza = require('./routes/cobranza');
 const rutasProveedores = require('./routes/proveedores');
+const rutasCatalogos = require('./routes/catalogos');
 
 const app = express();
 const port = process.env.API_PORT || 3010;
@@ -61,6 +62,8 @@ app.use(express.json());
 
 // 3. Logs detallados (Para ver quién entra y cuánto tarda)
 app.use(morgan(':localdate :remote-addr - :method :url :status :response-time ms'));
+
+app.use('/api/catalogos', rutasCatalogos);
 
 app.use('/api/dashboard', dashboardRoutes);
 
