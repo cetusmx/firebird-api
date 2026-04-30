@@ -44,7 +44,7 @@ async function resolverClave(idProveedor, claveProveedor) {
  * A. Consulta Masiva de Claves (POST)
  * Nueva estructura: { cve_clpv: "...", partidas: [...] }
  */
-router.post('/getclavesproveedor', async (req, res) => {
+router.post('/getclavesprovee', async (req, res) => {
     const { rfc, claves } = req.body;
 
     if (!rfc || !claves || !Array.isArray(claves)) {
@@ -91,7 +91,7 @@ router.post('/getclavesproveedor', async (req, res) => {
 /**
  * B. Consulta Unitaria (GET) - Se mantiene igual
  */
-router.get('/getclavesproveedor', async (req, res) => {
+router.get('/getclavesprovee', async (req, res) => {
     const rfc = req.query.rfc;
     const clave_proveedor = req.query.clave_proveedor || req.query.clave;
 
