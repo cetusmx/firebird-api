@@ -2,10 +2,11 @@ const express = require('express');
 const router = express.Router();
 const db = require('../db'); // Usando la conexión de Empresa 2 (sufijo 02)
 
-/**
+/* **
  * Función auxiliar para resolver la clave de un producto
  * Basada en la lógica de prioridad: Catálogo -> Clave Alterna
  */
+/*
 async function resolverClave(idProveedor, claveProveedor) {
     // 1. Intentar en Catálogo (INVE_CLIB02)
     // Regla: CAMPLIB15 si ID=35, CAMPLIB16 si ID=3
@@ -29,6 +30,50 @@ async function resolverClave(idProveedor, claveProveedor) {
     }
 
     // Si no se encontró en ninguna
+    return { clave: null, origen: "No encontrado" };
+} */
+
+/**
+ * Función auxiliar para resolver la clave de un producto
+ * Ahora valida que el STATUS en INVE02 sea 'A' (Activo)
+ */
+async function resolverClave(idProveedor, claveProveedor) {
+    // 1. Intentar en Catálogo (INVE_CLIB02) + Validación de Estatus
+    let campoLibre = null;
+    if (idProveedor === "35") campoLibre = "CAMPLIB15";
+    else if (idProveedor === "3") campoLibre = "CAMPLIB16";
+
+    if (campoLibre) {
+        const sqlCat = `
+            SELECT TRIM(I.CVE_ART) as CLAVE_INTERNA 
+            FROM INVE_CLIB02 C
+            INNER JOIN INVE02 I ON I.CVE_ART = C.CVE_PROD
+            WHERE TRIM(C.${campoLibre}) = ? 
+              AND I.STATUS = 'A'`; // <-- Solo activos
+
+        const resCat = await db.query(sqlCat, [claveProveedor]);
+
+        if (resCat.length > 0 && resCat[0].CLAVE_INTERNA) {
+            return { clave: resCat[0].CLAVE_INTERNA, origen: "Catálogo" };
+        }
+    }
+
+    // 2. Si no se encontró, intentar en Claves Alternas (CVES_ALTER02) + Validación de Estatus
+    const sqlAlt = `
+        SELECT TRIM(I.CVE_ART) as CLAVE_INTERNA 
+        FROM CVES_ALTER02 A
+        INNER JOIN INVE02 I ON I.CVE_ART = A.CVE_ART
+        WHERE A.CVE_CLPV = ? 
+          AND TRIM(A.CVE_ALTER) = ? 
+          AND I.STATUS = 'A'`; // <-- Solo activos
+
+    const resAlt = await db.query(sqlAlt, [idProveedor, claveProveedor]);
+
+    if (resAlt.length > 0 && resAlt[0].CLAVE_INTERNA) {
+        return { clave: resAlt[0].CLAVE_INTERNA, origen: "Clave alterna" };
+    }
+
+    // Si no hubo coincidencia o los productos encontrados están de Baja ('B')
     return { clave: null, origen: "No encontrado" };
 }
 
@@ -81,8 +126,8 @@ router.get('/getclavesprovee', async (req, res) => {
     const clave_proveedor = req.query.clave_proveedor || req.query.clave;
 
     if (!rfc || !clave_proveedor) {
-        return res.status(400).json({ 
-            error: "rfc y clave_proveedor (o clave) son requeridos" 
+        return res.status(400).json({
+            error: "rfc y clave_proveedor (o clave) son requeridos"
         });
     }
 
