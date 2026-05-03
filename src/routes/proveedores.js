@@ -1,38 +1,45 @@
 const express = require('express');
 const router = express.Router();
-const db = require('../db'); 
+const db = require('../db');
 
 /**
  * Función auxiliar para resolver la clave de un producto (Se mantiene igual)
  */
 async function resolverClave(idProveedor, claveProveedor) {
+    const cveProvLimpia = (claveProveedor || "").trim();
+    const idProvLimpio = (idProveedor || "").trim();
+
+    // 1. Intentar en Catálogo (INVE_CLIB02)
     let campoLibre = null;
-    if (idProveedor === "35") campoLibre = "CAMPLIB15";
-    else if (idProveedor === "3") campoLibre = "CAMPLIB16";
+    if (idProvLimpio === "35") campoLibre = "CAMPLIB15";
+    else if (idProvLimpio === "3") campoLibre = "CAMPLIB16";
 
     if (campoLibre) {
         const sqlCat = `
             SELECT TRIM(I.CVE_ART) as CLAVE_INTERNA 
             FROM INVE_CLIB02 C
-            INNER JOIN INVE02 I ON I.CVE_ART = C.CVE_PROD
+            INNER JOIN INVE02 I ON TRIM(I.CVE_ART) = TRIM(C.CVE_PROD)
             WHERE TRIM(C.${campoLibre}) = ? 
               AND I.STATUS = 'A'`;
-        
-        const resCat = await db.query(sqlCat, [claveProveedor]);
+
+        const resCat = await db.query(sqlCat, [cveProvLimpia]);
         if (resCat.length > 0 && resCat[0].CLAVE_INTERNA) {
             return { clave: resCat[0].CLAVE_INTERNA, origen: "Catálogo" };
         }
     }
 
+    // 2. Intentar en Claves Alternas (CVES_ALTER02)
+    // Aplicamos TRIM tanto al JOIN como a los parámetros del WHERE
     const sqlAlt = `
         SELECT TRIM(I.CVE_ART) as CLAVE_INTERNA 
         FROM CVES_ALTER02 A
-        INNER JOIN INVE02 I ON I.CVE_ART = A.CVE_ART
-        WHERE A.CVE_CLPV = ? 
+        INNER JOIN INVE02 I ON TRIM(I.CVE_ART) = TRIM(A.CVE_ART)
+        WHERE TRIM(A.CVE_CLPV) = ? 
           AND TRIM(A.CVE_ALTER) = ? 
           AND I.STATUS = 'A'`;
 
-    const resAlt = await db.query(sqlAlt, [idProveedor, claveProveedor]);
+    const resAlt = await db.query(sqlAlt, [idProvLimpio, cveProvLimpia]);
+
     if (resAlt.length > 0 && resAlt[0].CLAVE_INTERNA) {
         return { clave: resAlt[0].CLAVE_INTERNA, origen: "Clave alterna" };
     }
@@ -48,9 +55,9 @@ router.post('/getclavesprovee', async (req, res) => {
     const { rfc, claves } = req.body;
 
     if (!rfc || !claves || !Array.isArray(claves)) {
-        return res.status(400).json({ 
-            error: "Formato incorrecto", 
-            detalle: "Se requiere 'rfc' y un arreglo 'claves'." 
+        return res.status(400).json({
+            error: "Formato incorrecto",
+            detalle: "Se requiere 'rfc' y un arreglo 'claves'."
         });
     }
 
