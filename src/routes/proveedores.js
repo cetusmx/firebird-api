@@ -6,48 +6,6 @@ const db = require('../db');
  * Función auxiliar para resolver la clave de un producto (Se mantiene igual)
  */
 /* async function resolverClave(idProveedor, claveProveedor) {
-    const cveProvLimpia = (claveProveedor || "").trim();
-    const idProvLimpio = (idProveedor || "").trim();
-
-    // 1. Intentar en Catálogo (INVE_CLIB02)
-    let campoLibre = null;
-    if (idProvLimpio === "35") campoLibre = "CAMPLIB15";
-    else if (idProvLimpio === "3") campoLibre = "CAMPLIB16";
-
-    if (campoLibre) {
-        const sqlCat = `
-            SELECT TRIM(I.CVE_ART) as CLAVE_INTERNA 
-            FROM INVE_CLIB02 C
-            INNER JOIN INVE02 I ON TRIM(I.CVE_ART) = TRIM(C.CVE_PROD)
-            WHERE TRIM(C.${campoLibre}) = ? 
-              AND I.STATUS = 'A'`;
-
-        const resCat = await db.query(sqlCat, [cveProvLimpia]);
-        if (resCat.length > 0 && resCat[0].CLAVE_INTERNA) {
-            return { clave: resCat[0].CLAVE_INTERNA, origen: "Catálogo" };
-        }
-    }
-
-    // 2. Intentar en Claves Alternas (CVES_ALTER02)
-    // Aplicamos TRIM tanto al JOIN como a los parámetros del WHERE
-    const sqlAlt = `
-        SELECT TRIM(I.CVE_ART) as CLAVE_INTERNA 
-        FROM CVES_ALTER02 A
-        INNER JOIN INVE02 I ON TRIM(I.CVE_ART) = TRIM(A.CVE_ART)
-        WHERE TRIM(A.CVE_CLPV) = ? 
-          AND TRIM(A.CVE_ALTER) = ? 
-          AND I.STATUS = 'A'`;
-
-    const resAlt = await db.query(sqlAlt, [idProvLimpio, cveProvLimpia]);
-
-    if (resAlt.length > 0 && resAlt[0].CLAVE_INTERNA) {
-        return { clave: resAlt[0].CLAVE_INTERNA, origen: "Clave alterna" };
-    }
-
-    return { clave: null, origen: "No encontrado" };
-} */
-
-async function resolverClave(idProveedor, claveProveedor) {
     // 1. Limpieza y validación en JS
     const cve = String(claveProveedor || "").trim();
     const idProv = String(idProveedor || "").trim();
@@ -97,6 +55,63 @@ async function resolverClave(idProveedor, claveProveedor) {
         }
     } catch (e) {
         console.error(`Error en búsqueda Alterna (${cve}):`, e.message);
+    }
+
+    return { clave: null, origen: "No encontrado" };
+} */
+
+    async function resolverClave(idProveedor, claveProveedor) {
+    // 1. Limpieza absoluta en JS
+    const cve = String(claveProveedor || "").trim();
+    const idProv = String(idProveedor || "").trim();
+
+    if (!cve) return { clave: null, origen: "No encontrado" };
+
+    let campoLibre = null;
+    if (idProv === "35") campoLibre = "CAMPLIB15";
+    else if (idProv === "3") campoLibre = "CAMPLIB16";
+
+    // --- INTENTO 1: CATÁLOGO (INVE_CLIB02) ---
+    if (campoLibre) {
+        const sqlCat = `
+            SELECT FIRST 1 I.CVE_ART 
+            FROM INVE_CLIB02 C
+            INNER JOIN INVE02 I ON TRIM(I.CVE_ART) = TRIM(C.CVE_PROD)
+            WHERE TRIM(C.${campoLibre}) = CAST(? AS VARCHAR(100)) 
+              AND I.STATUS = 'A'`;
+        
+        try {
+            const resCat = await db.query(sqlCat, [cve]);
+            if (resCat.length > 0 && resCat[0].CVE_ART) {
+                return { clave: resCat[0].CVE_ART.trim(), origen: "Catálogo" };
+            }
+        } catch (e) {
+            console.error(`Error Catálogo:`, e.message);
+        }
+    }
+
+    // --- INTENTO 2: CLAVES ALTERNAS (CVES_ALTER02) ---
+    // Agregamos TRIM a las columnas del JOIN y del WHERE para asegurar el match
+    const sqlAlt = `
+        SELECT FIRST 1 I.CVE_ART 
+        FROM CVES_ALTER02 A
+        INNER JOIN INVE02 I ON TRIM(I.CVE_ART) = TRIM(A.CVE_ART)
+        WHERE TRIM(A.CVE_CLPV) = CAST(? AS VARCHAR(10)) 
+          AND TRIM(A.CVE_ALTER) = CAST(? AS VARCHAR(20)) 
+          AND I.STATUS = 'A'`;
+
+    try {
+        // Ejecutamos con los parámetros limpios
+        const resAlt = await db.query(sqlAlt, [idProv, cve]);
+        
+        if (resAlt.length > 0 && resAlt[0].CVE_ART) {
+            return { 
+                clave: resAlt[0].CVE_ART.trim(), 
+                origen: "Clave alterna" 
+            };
+        }
+    } catch (e) {
+        console.error(`Error Alterna:`, e.message);
     }
 
     return { clave: null, origen: "No encontrado" };
