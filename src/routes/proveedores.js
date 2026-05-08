@@ -48,46 +48,55 @@ const db = require('../db');
 } */
 
 async function resolverClave(idProveedor, claveProveedor) {
-    // 1. Limpieza rigurosa en JS (evitamos que Firebird truene por longitud)
-    // Las claves en SAE suelen ser de 20 caracteres, el ID de proveedor de 10.
-    const cveProvLimpia = (claveProveedor || "").toString().trim().substring(0, 20);
-    const idProvLimpio = (idProveedor || "").toString().trim().substring(0, 10);
+    // 1. Limpieza y validación en JS
+    const cve = String(claveProveedor || "").trim();
+    const idProv = String(idProveedor || "").trim();
 
-    if (!cveProvLimpia) return { clave: null, origen: "No encontrado" };
+    if (!cve) return { clave: null, origen: "No encontrado" };
 
-    // 2. Intentar en Catálogo (INVE_CLIB02)
+    // Determinamos el campo libre
     let campoLibre = null;
-    if (idProvLimpio === "35") campoLibre = "CAMPLIB15";
-    else if (idProvLimpio === "3") campoLibre = "CAMPLIB16";
+    if (idProv === "35") campoLibre = "CAMPLIB15";
+    else if (idProv === "3") campoLibre = "CAMPLIB16";
 
+    // 2. Intento en Catálogo (INVE_CLIB02)
     if (campoLibre) {
-        // Quitamos TRIM de las columnas para que use índices y no de error -303
+        // Usamos CAST para forzar el tipo de dato y evitar el error -303
+        // Los campos CAMPLIB suelen ser VARCHAR(60) o más en SAE
         const sqlCat = `
-            SELECT FIRST 1 TRIM(I.CVE_ART) as CLAVE_INTERNA 
+            SELECT FIRST 1 I.CVE_ART 
             FROM INVE_CLIB02 C
             INNER JOIN INVE02 I ON I.CVE_ART = C.CVE_PROD
-            WHERE C.${campoLibre} = ? 
+            WHERE C.${campoLibre} = CAST(? AS VARCHAR(100)) 
               AND I.STATUS = 'A'`;
-
-        const resCat = await db.query(sqlCat, [cveProvLimpia]);
-        if (resCat.length > 0 && resCat[0].CLAVE_INTERNA) {
-            return { clave: resCat[0].CLAVE_INTERNA, origen: "Catálogo" };
+        
+        try {
+            const resCat = await db.query(sqlCat, [cve]);
+            if (resCat.length > 0 && resCat[0].CVE_ART) {
+                return { clave: resCat[0].CVE_ART.trim(), origen: "Catálogo" };
+            }
+        } catch (e) {
+            console.error(`Error en búsqueda Catálogo (${cve}):`, e.message);
         }
     }
 
-    // 3. Intentar en Claves Alternas (CVES_ALTER02)
+    // 3. Intento en Claves Alternas (CVES_ALTER02)
+    // Forzamos CAST a los tamaños estándar de SAE (CVE_CLPV es 10, CVE_ALTER es 20)
     const sqlAlt = `
-        SELECT FIRST 1 TRIM(I.CVE_ART) as CLAVE_INTERNA 
+        SELECT FIRST 1 I.CVE_ART 
         FROM CVES_ALTER02 A
         INNER JOIN INVE02 I ON I.CVE_ART = A.CVE_ART
-        WHERE A.CVE_CLPV = ? 
-          AND A.CVE_ALTER = ? 
+        WHERE A.CVE_CLPV = CAST(? AS VARCHAR(10)) 
+          AND A.CVE_ALTER = CAST(? AS VARCHAR(20)) 
           AND I.STATUS = 'A'`;
 
-    const resAlt = await db.query(sqlAlt, [idProvLimpio, cveProvLimpia]);
-
-    if (resAlt.length > 0 && resAlt[0].CLAVE_INTERNA) {
-        return { clave: resAlt[0].CLAVE_INTERNA, origen: "Clave alterna" };
+    try {
+        const resAlt = await db.query(sqlAlt, [idProv, cve]);
+        if (resAlt.length > 0 && resAlt[0].CVE_ART) {
+            return { clave: resAlt[0].CVE_ART.trim(), origen: "Clave alterna" };
+        }
+    } catch (e) {
+        console.error(`Error en búsqueda Alterna (${cve}):`, e.message);
     }
 
     return { clave: null, origen: "No encontrado" };
