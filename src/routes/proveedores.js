@@ -5,7 +5,7 @@ const db = require('../db');
 /**
  * Función auxiliar para resolver la clave de un producto (Se mantiene igual)
  */
-async function resolverClave(idProveedor, claveProveedor) {
+/* async function resolverClave(idProveedor, claveProveedor) {
     const cveProvLimpia = (claveProveedor || "").trim();
     const idProvLimpio = (idProveedor || "").trim();
 
@@ -36,6 +36,52 @@ async function resolverClave(idProveedor, claveProveedor) {
         INNER JOIN INVE02 I ON TRIM(I.CVE_ART) = TRIM(A.CVE_ART)
         WHERE TRIM(A.CVE_CLPV) = ? 
           AND TRIM(A.CVE_ALTER) = ? 
+          AND I.STATUS = 'A'`;
+
+    const resAlt = await db.query(sqlAlt, [idProvLimpio, cveProvLimpia]);
+
+    if (resAlt.length > 0 && resAlt[0].CLAVE_INTERNA) {
+        return { clave: resAlt[0].CLAVE_INTERNA, origen: "Clave alterna" };
+    }
+
+    return { clave: null, origen: "No encontrado" };
+} */
+
+async function resolverClave(idProveedor, claveProveedor) {
+    // 1. Limpieza rigurosa en JS (evitamos que Firebird truene por longitud)
+    // Las claves en SAE suelen ser de 20 caracteres, el ID de proveedor de 10.
+    const cveProvLimpia = (claveProveedor || "").toString().trim().substring(0, 20);
+    const idProvLimpio = (idProveedor || "").toString().trim().substring(0, 10);
+
+    if (!cveProvLimpia) return { clave: null, origen: "No encontrado" };
+
+    // 2. Intentar en Catálogo (INVE_CLIB02)
+    let campoLibre = null;
+    if (idProvLimpio === "35") campoLibre = "CAMPLIB15";
+    else if (idProvLimpio === "3") campoLibre = "CAMPLIB16";
+
+    if (campoLibre) {
+        // Quitamos TRIM de las columnas para que use índices y no de error -303
+        const sqlCat = `
+            SELECT FIRST 1 TRIM(I.CVE_ART) as CLAVE_INTERNA 
+            FROM INVE_CLIB02 C
+            INNER JOIN INVE02 I ON I.CVE_ART = C.CVE_PROD
+            WHERE C.${campoLibre} = ? 
+              AND I.STATUS = 'A'`;
+
+        const resCat = await db.query(sqlCat, [cveProvLimpia]);
+        if (resCat.length > 0 && resCat[0].CLAVE_INTERNA) {
+            return { clave: resCat[0].CLAVE_INTERNA, origen: "Catálogo" };
+        }
+    }
+
+    // 3. Intentar en Claves Alternas (CVES_ALTER02)
+    const sqlAlt = `
+        SELECT FIRST 1 TRIM(I.CVE_ART) as CLAVE_INTERNA 
+        FROM CVES_ALTER02 A
+        INNER JOIN INVE02 I ON I.CVE_ART = A.CVE_ART
+        WHERE A.CVE_CLPV = ? 
+          AND A.CVE_ALTER = ? 
           AND I.STATUS = 'A'`;
 
     const resAlt = await db.query(sqlAlt, [idProvLimpio, cveProvLimpia]);
