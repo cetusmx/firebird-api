@@ -5,6 +5,7 @@ const db = require('../db');
 /**
  * GET /api/productos
  * Catálogo de productos con filtros, paginación y opción de descarga.
+ * Filtro por defecto: Solo productos con Familia (CAMPLIB24) asignada.
  */
 router.get('/productos', async (req, res) => {
     try {
@@ -20,8 +21,9 @@ router.get('/productos', async (req, res) => {
         const offset = (pPage - 1) * pLimit;
 
         // 1. CONSTRUCCIÓN DINÁMICA DE FILTROS
-        // Usamos STARTING WITH en lugar de TRIM para aprovechar índices y evitar que se cuelgue
-        let whereClause = "WHERE I.STATUS = 'A'";
+        // Agregamos por default: I.STATUS = 'A' Y C.CAMPLIB24 IS NOT NULL
+        // Esto evita productos sin categoría de familia.
+        let whereClause = "WHERE I.STATUS = 'A' AND C.CAMPLIB24 IS NOT NULL AND C.CAMPLIB24 <> ''";
         const params = [];
 
         if (search) {
@@ -46,7 +48,7 @@ router.get('/productos', async (req, res) => {
         }
 
         if (familia) {
-            // CORRECCIÓN: Se cambió de CAMPLIB22 a CAMPLIB24
+            // Si el usuario filtra por una familia específica, se añade aquí
             whereClause += " AND C.CAMPLIB24 STARTING WITH ?";
             params.push(familia.trim().toUpperCase());
         }
@@ -57,14 +59,15 @@ router.get('/productos', async (req, res) => {
             const countSql = `
                 SELECT COUNT(*) as TOTAL 
                 FROM INVE02 I 
-                LEFT JOIN INVE_CLIB02 C ON I.CVE_ART = C.CVE_PROD 
+                INNER JOIN INVE_CLIB02 C ON I.CVE_ART = C.CVE_PROD 
                 ${whereClause}`;
+            // Nota: Cambié LEFT JOIN por INNER JOIN en el conteo porque el filtro 
+            // IS NOT NULL de la tabla C hace que el LEFT JOIN se comporte como INNER.
             const countRes = await db.query(countSql, params);
             totalRecords = countRes[0].TOTAL;
         }
 
         // 3. CONSULTA PRINCIPAL
-        // Se eliminan TRIMs innecesarios de los JOINs para máxima velocidad
         let sql = `
             SELECT 
                 TRIM(I.CVE_ART) as "CVE_ART", 
@@ -82,13 +85,12 @@ router.get('/productos', async (req, res) => {
                 TRIM(A1.CVE_ALTER) as "Clave SYR alterna",
                 TRIM(A2.CVE_ALTER) as "Clave LC alterna"
             FROM INVE02 I
-            LEFT JOIN INVE_CLIB02 C ON C.CVE_PROD = I.CVE_ART
+            INNER JOIN INVE_CLIB02 C ON C.CVE_PROD = I.CVE_ART
             LEFT JOIN CVES_ALTER02 A1 ON A1.CVE_ART = I.CVE_ART AND A1.CVE_CLPV = '35'
             LEFT JOIN CVES_ALTER02 A2 ON A2.CVE_ART = I.CVE_ART AND A2.CVE_CLPV = '3'
             ${whereClause}
             ORDER BY I.CVE_ART ASC`;
 
-        // Aplicar paginación si no es descarga
         const finalParams = [...params];
         if (!isDownload) {
             sql += ` ROWS ? TO ?`;
@@ -99,10 +101,8 @@ router.get('/productos', async (req, res) => {
 
         // 4. ENVÍO DE RESPUESTA
         if (isDownload) {
-            // Formato de arreglo simple para Excel/CSV
             res.json(productos);
         } else {
-            // Formato estructurado para Grid con paginación
             res.json({
                 total: totalRecords,
                 pag: pPage,
