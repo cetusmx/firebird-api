@@ -21,8 +21,7 @@ router.get('/productos', async (req, res) => {
         const offset = (pPage - 1) * pLimit;
 
         // 1. CONSTRUCCIÓN DINÁMICA DE FILTROS
-        // Agregamos por default: I.STATUS = 'A' Y C.CAMPLIB24 IS NOT NULL
-        // Esto evita productos sin categoría de familia.
+        // Filtro base: Solo productos activos con familia definida
         let whereClause = "WHERE I.STATUS = 'A' AND C.CAMPLIB24 IS NOT NULL AND C.CAMPLIB24 <> ''";
         const params = [];
 
@@ -48,12 +47,11 @@ router.get('/productos', async (req, res) => {
         }
 
         if (familia) {
-            // Si el usuario filtra por una familia específica, se añade aquí
             whereClause += " AND C.CAMPLIB24 STARTING WITH ?";
             params.push(familia.trim().toUpperCase());
         }
 
-        // 2. OBTENER TOTAL DE REGISTROS (Solo si no es descarga)
+        // 2. OBTENER TOTAL DE REGISTROS (Para paginación)
         let totalRecords = 0;
         if (!isDownload) {
             const countSql = `
@@ -61,13 +59,12 @@ router.get('/productos', async (req, res) => {
                 FROM INVE02 I 
                 INNER JOIN INVE_CLIB02 C ON I.CVE_ART = C.CVE_PROD 
                 ${whereClause}`;
-            // Nota: Cambié LEFT JOIN por INNER JOIN en el conteo porque el filtro 
-            // IS NOT NULL de la tabla C hace que el LEFT JOIN se comporte como INNER.
             const countRes = await db.query(countSql, params);
             totalRecords = countRes[0].TOTAL;
         }
 
         // 3. CONSULTA PRINCIPAL
+        // Se incluyen los nuevos campos de dimensiones: CAMPLIB1, CAMPLIB2, CAMPLIB3
         let sql = `
             SELECT 
                 TRIM(I.CVE_ART) as "CVE_ART", 
@@ -77,6 +74,9 @@ router.get('/productos', async (req, res) => {
                 I.FCH_ULTCOM, 
                 I.ULT_COSTO, 
                 I.EXIST,
+                TRIM(C.CAMPLIB1) as "Diámetro Interior",
+                TRIM(C.CAMPLIB2) as "Diámetro Exterior",
+                TRIM(C.CAMPLIB3) as "Altura",
                 TRIM(C.CAMPLIB13) as "Perfil",
                 TRIM(C.CAMPLIB21) as "Genero",
                 TRIM(C.CAMPLIB24) as "Familia",
