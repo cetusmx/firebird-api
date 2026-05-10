@@ -2,6 +2,10 @@ const express = require('express');
 const router = express.Router();
 const db = require('../db');
 
+/**
+ * GET /api/productos
+ * Catálogo de productos con filtros, paginación y opción de descarga.
+ */
 router.get('/productos', async (req, res) => {
     try {
         const { 
@@ -15,7 +19,8 @@ router.get('/productos', async (req, res) => {
         const pLimit = parseInt(limit) || 50;
         const offset = (pPage - 1) * pLimit;
 
-        // 1. Construcción dinámica de filtros
+        // 1. CONSTRUCCIÓN DINÁMICA DE FILTROS
+        // Usamos STARTING WITH en lugar de TRIM para aprovechar índices y evitar que se cuelgue
         let whereClause = "WHERE I.STATUS = 'A'";
         const params = [];
 
@@ -24,24 +29,29 @@ router.get('/productos', async (req, res) => {
             const s = `%${search.toUpperCase()}%`;
             params.push(s, s);
         }
+        
         if (linea) {
-            whereClause += " AND TRIM(I.LIN_PROD) = ?";
-            params.push(linea.trim());
-        }
-        if (perfil) {
-            whereClause += " AND TRIM(C.CAMPLIB13) = ?";
-            params.push(perfil.trim());
-        }
-        if (genero) {
-            whereClause += " AND TRIM(C.CAMPLIB21) = ?";
-            params.push(genero.trim());
-        }
-        if (familia) {
-            whereClause += " AND TRIM(C.CAMPLIB22) = ?";
-            params.push(familia.trim());
+            whereClause += " AND I.LIN_PROD STARTING WITH ?";
+            params.push(linea.trim().toUpperCase());
         }
 
-        // 2. Obtener Total (Solo si no es descarga)
+        if (perfil) {
+            whereClause += " AND C.CAMPLIB13 STARTING WITH ?";
+            params.push(perfil.trim().toUpperCase());
+        }
+
+        if (genero) {
+            whereClause += " AND C.CAMPLIB21 STARTING WITH ?";
+            params.push(genero.trim().toUpperCase());
+        }
+
+        if (familia) {
+            // CORRECCIÓN: Se cambió de CAMPLIB22 a CAMPLIB24
+            whereClause += " AND C.CAMPLIB24 STARTING WITH ?";
+            params.push(familia.trim().toUpperCase());
+        }
+
+        // 2. OBTENER TOTAL DE REGISTROS (Solo si no es descarga)
         let totalRecords = 0;
         if (!isDownload) {
             const countSql = `
@@ -53,40 +63,46 @@ router.get('/productos', async (req, res) => {
             totalRecords = countRes[0].TOTAL;
         }
 
-        // 3. Consulta Principal
-        // Si es descarga, no usamos ROWS (paginación)
+        // 3. CONSULTA PRINCIPAL
+        // Se eliminan TRIMs innecesarios de los JOINs para máxima velocidad
         let sql = `
             SELECT 
                 TRIM(I.CVE_ART) as "CVE_ART", 
                 TRIM(I.DESCR) as "DESCR", 
                 TRIM(I.LIN_PROD) as "LIN_PROD", 
                 TRIM(I.UNI_MED) as "UNI_MED", 
-                I.FCH_ULTCOM, I.ULT_COSTO, I.EXIST,
+                I.FCH_ULTCOM, 
+                I.ULT_COSTO, 
+                I.EXIST,
                 TRIM(C.CAMPLIB13) as "Perfil",
                 TRIM(C.CAMPLIB21) as "Genero",
-                TRIM(C.CAMPLIB22) as "Familia",
+                TRIM(C.CAMPLIB24) as "Familia",
                 TRIM(C.CAMPLIB15) as "Clave SYR", 
                 TRIM(C.CAMPLIB16) as "Clave LC",
                 TRIM(A1.CVE_ALTER) as "Clave SYR alterna",
                 TRIM(A2.CVE_ALTER) as "Clave LC alterna"
             FROM INVE02 I
-            LEFT JOIN INVE_CLIB02 C ON TRIM(C.CVE_PROD) = TRIM(I.CVE_ART)
-            LEFT JOIN CVES_ALTER02 A1 ON TRIM(A1.CVE_ART) = TRIM(I.CVE_ART) AND TRIM(A1.CVE_CLPV) = '35'
-            LEFT JOIN CVES_ALTER02 A2 ON TRIM(A2.CVE_ART) = TRIM(I.CVE_ART) AND TRIM(A2.CVE_CLPV) = '3'
+            LEFT JOIN INVE_CLIB02 C ON C.CVE_PROD = I.CVE_ART
+            LEFT JOIN CVES_ALTER02 A1 ON A1.CVE_ART = I.CVE_ART AND A1.CVE_CLPV = '35'
+            LEFT JOIN CVES_ALTER02 A2 ON A2.CVE_ART = I.CVE_ART AND A2.CVE_CLPV = '3'
             ${whereClause}
             ORDER BY I.CVE_ART ASC`;
 
+        // Aplicar paginación si no es descarga
+        const finalParams = [...params];
         if (!isDownload) {
             sql += ` ROWS ? TO ?`;
-            params.push(offset + 1, offset + pLimit);
+            finalParams.push(offset + 1, offset + pLimit);
         }
 
-        const productos = await db.query(sql, params);
+        const productos = await db.query(sql, finalParams);
 
-        // 4. Respuesta estructurada
+        // 4. ENVÍO DE RESPUESTA
         if (isDownload) {
-            res.json(productos); // Solo el arreglo plano para la descarga
+            // Formato de arreglo simple para Excel/CSV
+            res.json(productos);
         } else {
+            // Formato estructurado para Grid con paginación
             res.json({
                 total: totalRecords,
                 pag: pPage,
@@ -96,8 +112,11 @@ router.get('/productos', async (req, res) => {
         }
 
     } catch (error) {
-        console.error("Error en catálogo:", error.message);
-        res.status(500).json({ error: "Error interno", detalle: error.message });
+        console.error("Error en catálogo de productos:", error.message);
+        res.status(500).json({ 
+            error: "Error interno del servidor", 
+            detalle: error.message 
+        });
     }
 });
 
