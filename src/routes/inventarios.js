@@ -2,11 +2,6 @@ const express = require('express');
 const router = express.Router();
 const db = require('../db');
 
-/**
- * GET /api/productos
- * Catálogo de productos con filtros, paginación y opción de descarga.
- * Filtro por defecto: Solo productos con Familia (CAMPLIB24) asignada.
- */
 router.get('/productos', async (req, res) => {
     try {
         const { 
@@ -20,8 +15,8 @@ router.get('/productos', async (req, res) => {
         const pLimit = parseInt(limit) || 50;
         const offset = (pPage - 1) * pLimit;
 
-        // 1. CONSTRUCCIÓN DINÁMICA DE FILTROS
-        // Filtro base: Solo productos activos con familia definida
+        // 1. FILTROS
+        // Usamos STARTING WITH para que ignore los espacios al final en la base de datos
         let whereClause = "WHERE I.STATUS = 'A' AND C.CAMPLIB24 IS NOT NULL AND C.CAMPLIB24 <> ''";
         const params = [];
 
@@ -51,29 +46,26 @@ router.get('/productos', async (req, res) => {
             params.push(familia.trim().toUpperCase());
         }
 
-        // 2. OBTENER TOTAL DE REGISTROS (Para paginación)
+        // 2. CONTEO
         let totalRecords = 0;
         if (!isDownload) {
             const countSql = `
                 SELECT COUNT(*) as TOTAL 
                 FROM INVE02 I 
-                INNER JOIN INVE_CLIB02 C ON I.CVE_ART = C.CVE_PROD 
+                INNER JOIN INVE_CLIB02 C ON TRIM(C.CVE_PROD) = TRIM(I.CVE_ART)
                 ${whereClause}`;
             const countRes = await db.query(countSql, params);
             totalRecords = countRes[0].TOTAL;
         }
 
-        // 3. CONSULTA PRINCIPAL
-        // Se incluyen los nuevos campos de dimensiones: CAMPLIB1, CAMPLIB2, CAMPLIB3
+        // 3. CONSULTA PRINCIPAL CON JOINS REFORZADOS
         let sql = `
             SELECT 
                 TRIM(I.CVE_ART) as "CVE_ART", 
                 TRIM(I.DESCR) as "DESCR", 
                 TRIM(I.LIN_PROD) as "LIN_PROD", 
                 TRIM(I.UNI_MED) as "UNI_MED", 
-                I.FCH_ULTCOM, 
-                I.ULT_COSTO, 
-                I.EXIST,
+                I.FCH_ULTCOM, I.ULT_COSTO, I.EXIST,
                 TRIM(C.CAMPLIB1) as "Diámetro Interior",
                 TRIM(C.CAMPLIB2) as "Diámetro Exterior",
                 TRIM(C.CAMPLIB3) as "Altura",
@@ -85,9 +77,10 @@ router.get('/productos', async (req, res) => {
                 TRIM(A1.CVE_ALTER) as "Clave SYR alterna",
                 TRIM(A2.CVE_ALTER) as "Clave LC alterna"
             FROM INVE02 I
-            INNER JOIN INVE_CLIB02 C ON C.CVE_PROD = I.CVE_ART
-            LEFT JOIN CVES_ALTER02 A1 ON A1.CVE_ART = I.CVE_ART AND A1.CVE_CLPV = '35'
-            LEFT JOIN CVES_ALTER02 A2 ON A2.CVE_ART = I.CVE_ART AND A2.CVE_CLPV = '3'
+            INNER JOIN INVE_CLIB02 C ON TRIM(C.CVE_PROD) = TRIM(I.CVE_ART)
+            /* Usamos STARTING WITH en el JOIN para que ignore espacios en la clave de proveedor */
+            LEFT JOIN CVES_ALTER02 A1 ON TRIM(A1.CVE_ART) = TRIM(I.CVE_ART) AND A1.CVE_CLPV STARTING WITH '35'
+            LEFT JOIN CVES_ALTER02 A2 ON TRIM(A2.CVE_ART) = TRIM(I.CVE_ART) AND A2.CVE_CLPV STARTING WITH '3'
             ${whereClause}
             ORDER BY I.CVE_ART ASC`;
 
@@ -99,24 +92,15 @@ router.get('/productos', async (req, res) => {
 
         const productos = await db.query(sql, finalParams);
 
-        // 4. ENVÍO DE RESPUESTA
         if (isDownload) {
             res.json(productos);
         } else {
-            res.json({
-                total: totalRecords,
-                pag: pPage,
-                limite: pLimit,
-                data: productos
-            });
+            res.json({ total: totalRecords, pag: pPage, limite: pLimit, data: productos });
         }
 
     } catch (error) {
-        console.error("Error en catálogo de productos:", error.message);
-        res.status(500).json({ 
-            error: "Error interno del servidor", 
-            detalle: error.message 
-        });
+        console.error("Error:", error.message);
+        res.status(500).json({ error: "Error interno", detalle: error.message });
     }
 });
 
