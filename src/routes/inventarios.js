@@ -16,7 +16,6 @@ router.get('/productos', async (req, res) => {
         const offset = (pPage - 1) * pLimit;
 
         // 1. FILTROS
-        // Usamos STARTING WITH para que ignore los espacios al final en la base de datos
         let whereClause = "WHERE I.STATUS = 'A' AND C.CAMPLIB24 IS NOT NULL AND C.CAMPLIB24 <> ''";
         const params = [];
 
@@ -25,40 +24,25 @@ router.get('/productos', async (req, res) => {
             const s = `%${search.toUpperCase()}%`;
             params.push(s, s);
         }
-        
         if (linea) {
             whereClause += " AND I.LIN_PROD STARTING WITH ?";
             params.push(linea.trim().toUpperCase());
         }
-
+        if (familia) {
+            whereClause += " AND C.CAMPLIB24 STARTING WITH ?";
+            params.push(familia.trim().toUpperCase());
+        }
         if (perfil) {
             whereClause += " AND C.CAMPLIB13 STARTING WITH ?";
             params.push(perfil.trim().toUpperCase());
         }
-
         if (genero) {
             whereClause += " AND C.CAMPLIB21 STARTING WITH ?";
             params.push(genero.trim().toUpperCase());
         }
 
-        if (familia) {
-            whereClause += " AND C.CAMPLIB24 STARTING WITH ?";
-            params.push(familia.trim().toUpperCase());
-        }
-
-        // 2. CONTEO
-        let totalRecords = 0;
-        if (!isDownload) {
-            const countSql = `
-                SELECT COUNT(*) as TOTAL 
-                FROM INVE02 I 
-                INNER JOIN INVE_CLIB02 C ON TRIM(C.CVE_PROD) = TRIM(I.CVE_ART)
-                ${whereClause}`;
-            const countRes = await db.query(countSql, params);
-            totalRecords = countRes[0].TOTAL;
-        }
-
-        // 3. CONSULTA PRINCIPAL CON JOINS REFORZADOS
+        // 2. CONSULTA SQL CORREGIDA
+        // La clave aquí es el TRIM en el campo CVE_CLPV para ignorar espacios a izq o der.
         let sql = `
             SELECT 
                 TRIM(I.CVE_ART) as "CVE_ART", 
@@ -78,9 +62,8 @@ router.get('/productos', async (req, res) => {
                 TRIM(A2.CVE_ALTER) as "Clave LC alterna"
             FROM INVE02 I
             INNER JOIN INVE_CLIB02 C ON TRIM(C.CVE_PROD) = TRIM(I.CVE_ART)
-            /* Usamos STARTING WITH en el JOIN para que ignore espacios en la clave de proveedor */
-            LEFT JOIN CVES_ALTER02 A1 ON TRIM(A1.CVE_ART) = TRIM(I.CVE_ART) AND A1.CVE_CLPV STARTING WITH '35'
-            LEFT JOIN CVES_ALTER02 A2 ON TRIM(A2.CVE_ART) = TRIM(I.CVE_ART) AND A2.CVE_CLPV STARTING WITH '3'
+            LEFT JOIN CVES_ALTER02 A1 ON TRIM(A1.CVE_ART) = TRIM(I.CVE_ART) AND (TRIM(A1.CVE_CLPV) = '35' OR A1.CVE_CLPV = '35')
+            LEFT JOIN CVES_ALTER02 A2 ON TRIM(A2.CVE_ART) = TRIM(I.CVE_ART) AND (TRIM(A2.CVE_CLPV) = '3' OR A2.CVE_CLPV = '3')
             ${whereClause}
             ORDER BY I.CVE_ART ASC`;
 
@@ -92,14 +75,22 @@ router.get('/productos', async (req, res) => {
 
         const productos = await db.query(sql, finalParams);
 
-        if (isDownload) {
-            res.json(productos);
-        } else {
-            res.json({ total: totalRecords, pag: pPage, limite: pLimit, data: productos });
+        // 3. CONTEO (Igualamos la lógica de Joins)
+        let totalRecords = 0;
+        if (!isDownload) {
+            const countSql = `
+                SELECT COUNT(*) as TOTAL 
+                FROM INVE02 I 
+                INNER JOIN INVE_CLIB02 C ON TRIM(C.CVE_PROD) = TRIM(I.CVE_ART)
+                ${whereClause}`;
+            const countRes = await db.query(countSql, params);
+            totalRecords = countRes[0].TOTAL;
         }
 
+        res.json(isDownload ? productos : { total: totalRecords, pag: pPage, limite: pLimit, data: productos });
+
     } catch (error) {
-        console.error("Error:", error.message);
+        console.error("Error en endpoint productos:", error.message);
         res.status(500).json({ error: "Error interno", detalle: error.message });
     }
 });
