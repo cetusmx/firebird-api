@@ -108,24 +108,29 @@ router.get('/productos', async (req, res) => {
         const pLimit = parseInt(limit) || 50;
         const offset = (pPage - 1) * pLimit;
 
-        // 1. FILTROS CON CAST DE SEGURIDAD
-        // Forzamos a que los campos sean tratados como VARCHAR para evitar el error -303
-        let whereClause = "WHERE I.STATUS = 'A' AND C.CAMPLIB24 IS NOT NULL";
+        // 1. FILTROS
+        // Cambiamos INNER por LEFT JOIN para asegurar que el producto no se pierda si falla la relación de campos libres
+        // Usamos CONTAINING para la búsqueda, es más fiable que LIKE en Firebird
+        let whereClause = "WHERE I.STATUS = 'A'";
         const params = [];
 
         if (search) {
-            // Aplicamos CAST a VARCHAR para que el LIKE no truene con claves largas
-            whereClause += ` AND (
-                CAST(I.CVE_ART AS VARCHAR(100)) LIKE ? OR 
-                CAST(I.DESCR AS VARCHAR(255)) LIKE ?
-            )`;
-            const s = `%${search.toUpperCase().trim()}%`;
-            params.push(s, s);
+            // CONTAINING busca la subcadena ignorando espacios y mayúsculas
+            whereClause += " AND (I.CVE_ART CONTAINING ? OR I.DESCR CONTAINING ?)";
+            params.push(search.trim(), search.trim());
         }
         
         if (linea) {
             whereClause += " AND I.LIN_PROD STARTING WITH ?";
             params.push(linea.trim().toUpperCase());
+        }
+
+        if (familia) {
+            whereClause += " AND C.CAMPLIB24 STARTING WITH ?";
+            params.push(familia.trim().toUpperCase());
+        } else {
+            // Si el usuario NO filtra por familia, aplicamos el filtro por defecto de no nulos
+            whereClause += " AND (C.CAMPLIB24 IS NOT NULL AND C.CAMPLIB24 <> '')";
         }
 
         if (perfil) {
@@ -138,14 +143,9 @@ router.get('/productos', async (req, res) => {
             params.push(genero.trim().toUpperCase());
         }
 
-        if (familia) {
-            whereClause += " AND C.CAMPLIB24 STARTING WITH ?";
-            params.push(familia.trim().toUpperCase());
-        }
-
         // 2. CONSULTA PRINCIPAL
-        // Mantenemos los JOINs lo más simples posible (sin TRIM ni CAST en el ON)
-        // Firebird maneja bien el cruce de CHAR(20) vs CHAR(20) de forma nativa.
+        // Importante: Usamos LEFT JOIN en INVE_CLIB02 para que el producto aparezca 
+        // aunque haya problemas en la tabla de campos libres.
         let sql = `
             SELECT 
                 TRIM(I.CVE_ART) as "CVE_ART", 
@@ -164,9 +164,9 @@ router.get('/productos', async (req, res) => {
                 TRIM(A1.CVE_ALTER) as "Clave SYR alterna",
                 TRIM(A2.CVE_ALTER) as "Clave LC alterna"
             FROM INVE02 I
-            INNER JOIN INVE_CLIB02 C ON C.CVE_PROD = I.CVE_ART
-            LEFT JOIN CVES_ALTER02 A1 ON A1.CVE_ART = I.CVE_ART AND A1.CVE_CLPV STARTING WITH '35'
-            LEFT JOIN CVES_ALTER02 A2 ON A2.CVE_ART = I.CVE_ART AND A2.CVE_CLPV STARTING WITH '3'
+            LEFT JOIN INVE_CLIB02 C ON TRIM(C.CVE_PROD) = TRIM(I.CVE_ART)
+            LEFT JOIN CVES_ALTER02 A1 ON TRIM(A1.CVE_ART) = TRIM(I.CVE_ART) AND A1.CVE_CLPV STARTING WITH '35'
+            LEFT JOIN CVES_ALTER02 A2 ON TRIM(A2.CVE_ART) = TRIM(I.CVE_ART) AND A2.CVE_CLPV STARTING WITH '3'
             ${whereClause}
             ORDER BY I.CVE_ART ASC`;
 
@@ -178,13 +178,13 @@ router.get('/productos', async (req, res) => {
 
         const productos = await db.query(sql, finalParams);
 
-        // 3. CONTEO (También con CAST para evitar que el COUNT falle)
+        // 3. CONTEO
         let totalRecords = 0;
         if (!isDownload) {
             const countSql = `
                 SELECT COUNT(*) as TOTAL 
                 FROM INVE02 I 
-                INNER JOIN INVE_CLIB02 C ON C.CVE_PROD = I.CVE_ART
+                LEFT JOIN INVE_CLIB02 C ON TRIM(C.CVE_PROD) = TRIM(I.CVE_ART)
                 ${whereClause}`;
             const countRes = await db.query(countSql, params);
             totalRecords = countRes[0].TOTAL;
@@ -198,11 +198,8 @@ router.get('/productos', async (req, res) => {
         });
 
     } catch (error) {
-        console.error("Error detectado:", error.message);
-        res.status(500).json({ 
-            error: "Error en la consulta Firebird", 
-            detalle: error.message 
-        });
+        console.error("Error:", error.message);
+        res.status(500).json({ error: "Error en consulta", detalle: error.message });
     }
 });
 
