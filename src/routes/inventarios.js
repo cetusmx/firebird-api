@@ -108,44 +108,42 @@ router.get('/productos', async (req, res) => {
         const pLimit = parseInt(limit) || 50;
         const offset = (pPage - 1) * pLimit;
 
-        // 1. FILTROS
-        // Cambiamos INNER por LEFT JOIN para asegurar que el producto no se pierda si falla la relación de campos libres
-        // Usamos CONTAINING para la búsqueda, es más fiable que LIKE en Firebird
+        // 1. FILTROS DINÁMICOS
         let whereClause = "WHERE I.STATUS = 'A'";
         const params = [];
 
+        // Filtro de búsqueda (Prioridad absoluta)
         if (search) {
-            // CONTAINING busca la subcadena ignorando espacios y mayúsculas
+            // Usamos CONTAINING que es el más robusto contra espacios y mayúsculas/minúsculas
             whereClause += " AND (I.CVE_ART CONTAINING ? OR I.DESCR CONTAINING ?)";
-            params.push(search.trim(), search.trim());
+            params.push(search.trim());
+            params.push(search.trim());
         }
-        
+
+        // Filtro de Familia (Si no hay búsqueda, obligamos a que tenga familia)
+        if (familia) {
+            whereClause += " AND C.CAMPLIB24 STARTING WITH ?";
+            params.push(familia.trim().toUpperCase());
+        } else if (!search) {
+            // Solo aplicamos el rigor de "familia no nula" si el usuario NO está buscando algo específico
+            whereClause += " AND C.CAMPLIB24 IS NOT NULL AND C.CAMPLIB24 <> ''";
+        }
+
         if (linea) {
             whereClause += " AND I.LIN_PROD STARTING WITH ?";
             params.push(linea.trim().toUpperCase());
         }
-
-        if (familia) {
-            whereClause += " AND C.CAMPLIB24 STARTING WITH ?";
-            params.push(familia.trim().toUpperCase());
-        } else {
-            // Si el usuario NO filtra por familia, aplicamos el filtro por defecto de no nulos
-            whereClause += " AND (C.CAMPLIB24 IS NOT NULL AND C.CAMPLIB24 <> '')";
-        }
-
         if (perfil) {
             whereClause += " AND C.CAMPLIB13 STARTING WITH ?";
             params.push(perfil.trim().toUpperCase());
         }
-
         if (genero) {
             whereClause += " AND C.CAMPLIB21 STARTING WITH ?";
             params.push(genero.trim().toUpperCase());
         }
 
         // 2. CONSULTA PRINCIPAL
-        // Importante: Usamos LEFT JOIN en INVE_CLIB02 para que el producto aparezca 
-        // aunque haya problemas en la tabla de campos libres.
+        // Usamos LEFT JOIN en todo para que NADA bloquee la aparición del producto principal
         let sql = `
             SELECT 
                 TRIM(I.CVE_ART) as "CVE_ART", 
@@ -164,9 +162,9 @@ router.get('/productos', async (req, res) => {
                 TRIM(A1.CVE_ALTER) as "Clave SYR alterna",
                 TRIM(A2.CVE_ALTER) as "Clave LC alterna"
             FROM INVE02 I
-            LEFT JOIN INVE_CLIB02 C ON TRIM(C.CVE_PROD) = TRIM(I.CVE_ART)
-            LEFT JOIN CVES_ALTER02 A1 ON TRIM(A1.CVE_ART) = TRIM(I.CVE_ART) AND A1.CVE_CLPV STARTING WITH '35'
-            LEFT JOIN CVES_ALTER02 A2 ON TRIM(A2.CVE_ART) = TRIM(I.CVE_ART) AND A2.CVE_CLPV STARTING WITH '3'
+            LEFT JOIN INVE_CLIB02 C ON I.CVE_ART = C.CVE_PROD
+            LEFT JOIN CVES_ALTER02 A1 ON I.CVE_ART = A1.CVE_ART AND A1.CVE_CLPV STARTING WITH '35'
+            LEFT JOIN CVES_ALTER02 A2 ON I.CVE_ART = A2.CVE_ART AND A2.CVE_CLPV STARTING WITH '3'
             ${whereClause}
             ORDER BY I.CVE_ART ASC`;
 
@@ -184,7 +182,7 @@ router.get('/productos', async (req, res) => {
             const countSql = `
                 SELECT COUNT(*) as TOTAL 
                 FROM INVE02 I 
-                LEFT JOIN INVE_CLIB02 C ON TRIM(C.CVE_PROD) = TRIM(I.CVE_ART)
+                LEFT JOIN INVE_CLIB02 C ON I.CVE_ART = C.CVE_PROD
                 ${whereClause}`;
             const countRes = await db.query(countSql, params);
             totalRecords = countRes[0].TOTAL;
@@ -198,8 +196,11 @@ router.get('/productos', async (req, res) => {
         });
 
     } catch (error) {
-        console.error("Error:", error.message);
-        res.status(500).json({ error: "Error en consulta", detalle: error.message });
+        console.error("Error en consulta:", error.message);
+        res.status(500).json({ 
+            error: "Error interno", 
+            detalle: error.message 
+        });
     }
 });
 
