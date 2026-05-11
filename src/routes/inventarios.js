@@ -108,16 +108,18 @@ router.get('/productos', async (req, res) => {
         const pLimit = parseInt(limit) || 50;
         const offset = (pPage - 1) * pLimit;
 
-        // 1. CONSTRUCCIÓN DE FILTROS
-        // Usamos condiciones que no fuercen conversiones de tipo pesadas
+        // 1. FILTROS CON CAST DE SEGURIDAD
+        // Forzamos a que los campos sean tratados como VARCHAR para evitar el error -303
         let whereClause = "WHERE I.STATUS = 'A' AND C.CAMPLIB24 IS NOT NULL";
         const params = [];
 
         if (search) {
-            // El truco aquí es asegurar que el parámetro no exceda el tamaño de la columna
-            // CVE_ART en SAE es CHAR(20).
-            whereClause += " AND (I.CVE_ART LIKE ? OR I.DESCR LIKE ?)";
-            const s = `%${search.toUpperCase()}%`;
+            // Aplicamos CAST a VARCHAR para que el LIKE no truene con claves largas
+            whereClause += ` AND (
+                CAST(I.CVE_ART AS VARCHAR(100)) LIKE ? OR 
+                CAST(I.DESCR AS VARCHAR(255)) LIKE ?
+            )`;
+            const s = `%${search.toUpperCase().trim()}%`;
             params.push(s, s);
         }
         
@@ -142,8 +144,8 @@ router.get('/productos', async (req, res) => {
         }
 
         // 2. CONSULTA PRINCIPAL
-        // ELIMINAMOS TRIM DE LOS JOINS. En SAE, CVE_ART y CVE_PROD son CHAR(20), 
-        // el motor los compara correctamente incluyendo los espacios de relleno.
+        // Mantenemos los JOINs lo más simples posible (sin TRIM ni CAST en el ON)
+        // Firebird maneja bien el cruce de CHAR(20) vs CHAR(20) de forma nativa.
         let sql = `
             SELECT 
                 TRIM(I.CVE_ART) as "CVE_ART", 
@@ -176,7 +178,7 @@ router.get('/productos', async (req, res) => {
 
         const productos = await db.query(sql, finalParams);
 
-        // 3. CONTEO
+        // 3. CONTEO (También con CAST para evitar que el COUNT falle)
         let totalRecords = 0;
         if (!isDownload) {
             const countSql = `
@@ -196,12 +198,10 @@ router.get('/productos', async (req, res) => {
         });
 
     } catch (error) {
-        // Log detallado para identificar qué parámetro causó el error
-        console.error("Error en endpoint productos:", error.message);
+        console.error("Error detectado:", error.message);
         res.status(500).json({ 
-            error: "Error de Truncamiento o Datos", 
-            detalle: error.message,
-            sugerencia: "Verifique que el filtro no exceda el tamaño permitido (20 caracteres para claves)."
+            error: "Error en la consulta Firebird", 
+            detalle: error.message 
         });
     }
 });
