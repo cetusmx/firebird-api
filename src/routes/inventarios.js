@@ -112,20 +112,18 @@ router.get('/productos', async (req, res) => {
         let whereClause = "WHERE I.STATUS = 'A'";
         const params = [];
 
-        // Filtro de búsqueda (Prioridad absoluta)
         if (search) {
-            // Usamos CONTAINING que es el más robusto contra espacios y mayúsculas/minúsculas
+            // CONTAINING soluciona el error -303 y es insensible a mayúsculas
             whereClause += " AND (I.CVE_ART CONTAINING ? OR I.DESCR CONTAINING ?)";
-            params.push(search.trim());
-            params.push(search.trim());
+            params.push(search.trim(), search.trim());
         }
 
-        // Filtro de Familia (Si no hay búsqueda, obligamos a que tenga familia)
+        // Regla: Si no hay búsqueda, ocultar los que no tienen familia.
+        // Si hay búsqueda, mostrar lo que sea que coincida.
         if (familia) {
             whereClause += " AND C.CAMPLIB24 STARTING WITH ?";
             params.push(familia.trim().toUpperCase());
         } else if (!search) {
-            // Solo aplicamos el rigor de "familia no nula" si el usuario NO está buscando algo específico
             whereClause += " AND C.CAMPLIB24 IS NOT NULL AND C.CAMPLIB24 <> ''";
         }
 
@@ -142,8 +140,8 @@ router.get('/productos', async (req, res) => {
             params.push(genero.trim().toUpperCase());
         }
 
-        // 2. CONSULTA PRINCIPAL
-        // Usamos LEFT JOIN en todo para que NADA bloquee la aparición del producto principal
+        // 2. CONSULTA SQL COMBINADA
+        // Usamos TRIM en los ON para las claves alternas y LEFT JOIN para no perder productos
         let sql = `
             SELECT 
                 TRIM(I.CVE_ART) as "CVE_ART", 
@@ -162,9 +160,9 @@ router.get('/productos', async (req, res) => {
                 TRIM(A1.CVE_ALTER) as "Clave SYR alterna",
                 TRIM(A2.CVE_ALTER) as "Clave LC alterna"
             FROM INVE02 I
-            LEFT JOIN INVE_CLIB02 C ON I.CVE_ART = C.CVE_PROD
-            LEFT JOIN CVES_ALTER02 A1 ON I.CVE_ART = A1.CVE_ART AND A1.CVE_CLPV STARTING WITH '35'
-            LEFT JOIN CVES_ALTER02 A2 ON I.CVE_ART = A2.CVE_ART AND A2.CVE_CLPV STARTING WITH '3'
+            LEFT JOIN INVE_CLIB02 C ON TRIM(C.CVE_PROD) = TRIM(I.CVE_ART)
+            LEFT JOIN CVES_ALTER02 A1 ON TRIM(A1.CVE_ART) = TRIM(I.CVE_ART) AND TRIM(A1.CVE_CLPV) = '35'
+            LEFT JOIN CVES_ALTER02 A2 ON TRIM(A2.CVE_ART) = TRIM(I.CVE_ART) AND TRIM(A2.CVE_CLPV) = '3'
             ${whereClause}
             ORDER BY I.CVE_ART ASC`;
 
@@ -182,7 +180,7 @@ router.get('/productos', async (req, res) => {
             const countSql = `
                 SELECT COUNT(*) as TOTAL 
                 FROM INVE02 I 
-                LEFT JOIN INVE_CLIB02 C ON I.CVE_ART = C.CVE_PROD
+                LEFT JOIN INVE_CLIB02 C ON TRIM(C.CVE_PROD) = TRIM(I.CVE_ART)
                 ${whereClause}`;
             const countRes = await db.query(countSql, params);
             totalRecords = countRes[0].TOTAL;
@@ -196,11 +194,8 @@ router.get('/productos', async (req, res) => {
         });
 
     } catch (error) {
-        console.error("Error en consulta:", error.message);
-        res.status(500).json({ 
-            error: "Error interno", 
-            detalle: error.message 
-        });
+        console.error("Error en endpoint productos:", error.message);
+        res.status(500).json({ error: "Error interno", detalle: error.message });
     }
 });
 
