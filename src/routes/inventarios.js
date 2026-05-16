@@ -96,12 +96,16 @@ const db = require('../db');
 }); */
 
 router.get('/productos', async (req, res) => {
+    console.log("Datos recibidos: ", req.query);
     try {
         const { 
             page, limit, search, 
             linea, perfil, genero, familia, 
             download 
         } = req.query;
+        console.log("Datos desglose: ", page, limit, search, 
+            linea, perfil, genero, familia, 
+            download);
 
         const isDownload = download === 'true';
         const pPage = parseInt(page) || 1;
