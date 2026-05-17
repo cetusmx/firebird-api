@@ -45,7 +45,7 @@ router.get('/productos', async (req, res) => {
             params.push(genero.trim().toUpperCase());
         }
 
-        // 2. CONSULTA PRINCIPAL ALIGERADA
+        // 2. CONSULTA PRINCIPAL ALIGERADA (Trae los productos de la página actual)
         let sql = `
             SELECT 
                 TRIM(I.CVE_ART) as "CVE_ART", 
@@ -76,7 +76,6 @@ router.get('/productos', async (req, res) => {
 
         // 3. TAREA DIVIDIDA: OBTENCIÓN DE CLAVES ALTERNAS EN LOTES
         if (productos.length > 0) {
-            // Usamos los códigos ya limpios (TRIM) para armar la búsqueda
             const trimmedCves = productos.map(p => p.CVE_ART);
             const alterRecords = [];
             const chunkSize = 1000;
@@ -85,16 +84,16 @@ router.get('/productos', async (req, res) => {
                 const chunk = trimmedCves.slice(i, i + chunkSize);
                 const placeholders = chunk.map(() => '?').join(',');
                 
-                // Aplicamos TRIM en el SELECT secundario para asegurar coincidencia exacta en JS
-                // Firebird rellena automáticamente con espacios los parámetros del IN para usar el índice CHAR(20)
+                // NOTA CLAVE: Al usar TRIM(CVE_ART) IN (...) obligamos a Firebird a ignorar 
+                // los espacios basura que tengan los VARCHAR(16) de la tabla secundaria.
                 const alterSql = `
                     SELECT 
                         TRIM(CVE_ART) as "CVE_ART", 
                         TRIM(CVE_CLPV) as "CLPV", 
                         TRIM(CVE_ALTER) as "ALTERNA" 
                     FROM CVES_ALTER02 
-                    WHERE CVE_ART IN (${placeholders})
-                      AND (CVE_CLPV STARTING WITH '35' OR CVE_CLPV STARTING WITH '3')
+                    WHERE TRIM(CVE_ART) IN (${placeholders})
+                      AND TRIM(CVE_CLPV) IN ('35', '3')
                 `;
                 
                 const chunkRes = await db.query(alterSql, chunk);
@@ -106,7 +105,7 @@ router.get('/productos', async (req, res) => {
                 p["Clave SYR alterna"] = "";
                 p["Clave LC alterna"] = "";
 
-                // Ahora que ambos lados de la ecuación tienen TRIM(), el match es 100% certero
+                // El match ahora es 100% perfecto porque ambos lados están limpios de espacios
                 const alts = alterRecords.filter(a => a.CVE_ART === p.CVE_ART);
                 alts.forEach(a => {
                     if (a.CLPV === '35') {
@@ -129,7 +128,6 @@ router.get('/productos', async (req, res) => {
             const countRes = await db.query(countSql, params);
             totalRecords = countRes[0].TOTAL;
         }
-        console.log("Productos devueltos: ",productos);
 
         res.json(isDownload ? productos : { 
             total: totalRecords, 
