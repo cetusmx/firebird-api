@@ -45,7 +45,7 @@ router.get('/productos', async (req, res) => {
             params.push(genero.trim().toUpperCase());
         }
 
-        // 2. CONSULTA PRINCIPAL ALIGERADA (Trae los productos de la página actual)
+        // 2. CONSULTA PRINCIPAL ALIGERADA
         let sql = `
             SELECT 
                 TRIM(I.CVE_ART) as "CVE_ART", 
@@ -84,8 +84,7 @@ router.get('/productos', async (req, res) => {
                 const chunk = trimmedCves.slice(i, i + chunkSize);
                 const placeholders = chunk.map(() => '?').join(',');
                 
-                // NOTA CLAVE: Al usar TRIM(CVE_ART) IN (...) obligamos a Firebird a ignorar 
-                // los espacios basura que tengan los VARCHAR(16) de la tabla secundaria.
+                // CORRECCIÓN AQUÍ: Aplicamos TRIM(CVE_ART) en el WHERE para que ignore los espacios del VARCHAR
                 const alterSql = `
                     SELECT 
                         TRIM(CVE_ART) as "CVE_ART", 
@@ -93,7 +92,7 @@ router.get('/productos', async (req, res) => {
                         TRIM(CVE_ALTER) as "ALTERNA" 
                     FROM CVES_ALTER02 
                     WHERE TRIM(CVE_ART) IN (${placeholders})
-                      AND TRIM(CVE_CLPV) IN ('35', '3')
+                      AND TRIM(CVE_CLPV) IN ('3', '35')
                 `;
                 
                 const chunkRes = await db.query(alterSql, chunk);
@@ -105,7 +104,7 @@ router.get('/productos', async (req, res) => {
                 p["Clave SYR alterna"] = "";
                 p["Clave LC alterna"] = "";
 
-                // El match ahora es 100% perfecto porque ambos lados están limpios de espacios
+                // Ahora que ambos lados de la ecuación sufrieron TRIM(), el match es 100% exacto
                 const alts = alterRecords.filter(a => a.CVE_ART === p.CVE_ART);
                 alts.forEach(a => {
                     if (a.CLPV === '35') {
@@ -128,6 +127,8 @@ router.get('/productos', async (req, res) => {
             const countRes = await db.query(countSql, params);
             totalRecords = countRes[0].TOTAL;
         }
+
+        console.log("Productos devueltos: ", productos);
 
         res.json(isDownload ? productos : { 
             total: totalRecords, 
