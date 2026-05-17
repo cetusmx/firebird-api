@@ -129,6 +129,7 @@ router.get('/productos', async (req, res) => {
             const countRes = await db.query(countSql, params);
             totalRecords = countRes[0].TOTAL;
         }
+        console.log("Productos devueltos: ",productos);
 
         res.json(isDownload ? productos : { 
             total: totalRecords, 
