@@ -2,12 +2,12 @@ const repo = require('../repositories/dashboardInventariosRepository');
 
 /**
  * Maneja la petición HTTP para calcular la asertividad del inventario cíclico
+ * SOPORTA: Múltiples movimientos de corrección por producto (Neteo de mercancía)
  */
 const getAsertividadCiclico = async (req, res) => {
     try {
         const { refer, productos } = req.body;
 
-        // 1. Validaciones HTTP de entrada
         if (!refer || !productos || !Array.isArray(productos)) {
             return res.status(400).json({ 
                 error: "Los parámetros 'refer' (string) y 'productos' (array de strings) son obligatorios." 
@@ -19,50 +19,78 @@ const getAsertividadCiclico = async (req, res) => {
         }
 
         const cleanedClaves = productos.map(p => String(p).trim());
-
-        // 2. Solicitar datos crudos al repositorio
         const datosBD = await repo.obtenerMovimientosYClasificacion(refer, cleanedClaves);
 
-        // 3. Aplicar Reglas de Negocio (Mapear el resultado final de cada producto)
+        // Procesamos producto por producto asegurando consolidación
         const respuestaFinal = cleanedClaves.map(clave => {
-            const registro = datosBD.find(r => r.CVE_ART === clave);
+            
+            // 1. Filtramos TODOS los movimientos que tuvo ESTE producto en específico
+            const movimientosProducto = datosBD.filter(r => r.CVE_ART === clave && r.REFER);
 
-            // Si se localizó el registro y tiene un REFER asociado, hubo movimiento destructivo/correctivo
-            if (registro && registro.REFER) {
-                let resultadoTxt = "SIN CAMBIO";
-                const cpto = parseInt(registro.CVE_CPTO, 10);
-                
-                if (cpto === 10) resultadoTxt = "AJUSTE";
-                if (cpto === 60) resultadoTxt = "MERMA";
-
-                return {
-                    CVE_ART: registro.CVE_ART,
-                    REFER: registro.REFER,
-                    CVE_CPTO: registro.CVE_CPTO,
-                    COSTO: registro.COSTO,
-                    CANT: registro.CANT,
-                    FAMILIA: registro.FAMILIA || "",
-                    GENERO: registro.GENERO || "",
-                    CATEGORIA: registro.CATEGORIA || "",
-                    RESULTADO: resultadoTxt
-                };
-            } else {
-                // Si el producto no tuvo movimientos generados por el administrador (O no existe en catálogo)
+            // ESCENARIO A: El producto no tiene ningún movimiento asignado
+            if (movimientosProducto.length === 0) {
+                const cat = datosBD.find(r => r.CVE_ART === clave);
                 return {
                     CVE_ART: clave,
                     REFER: "",
                     CVE_CPTO: null,
                     COSTO: null,
                     CANT: null,
-                    FAMILIA: registro ? (registro.FAMILIA || "") : "",
-                    GENERO: registro ? (registro.GENERO || "") : "",
-                    CATEGORIA: registro ? (registro.CATEGORIA || "") : "",
+                    FAMILIA: cat ? (cat.FAMILIA || "") : "",
+                    GENERO: cat ? (cat.GENERO || "") : "",
+                    CATEGORIA: cat ? (cat.CATEGORIA || "") : "",
                     RESULTADO: "SIN CAMBIO"
                 };
             }
+
+            // ESCENARIO B: Hay 1 o más movimientos. Vamos a consolidar (Netear)
+            const primerRegistro = movimientosProducto[0];
+            let totalAjuste = 0;
+            let totalMerma = 0;
+
+            movimientosProducto.forEach(mov => {
+                const cpto = parseInt(mov.CVE_CPTO, 10);
+                const cant = parseFloat(mov.CANT) || 0;
+                
+                if (cpto === 10) totalAjuste += cant;
+                if (cpto === 60) totalMerma += cant;
+            });
+
+            // Reglas de negocio para el Neteo
+            let resultadoTxt = "SIN CAMBIO";
+            let cveCptoFinal = null;
+            let cantidadFinal = 0;
+
+            if (totalAjuste === totalMerma) {
+                // Se cancelaron mutuamente (Ej: Merma de 5 y luego Ajuste de 5 para corregir)
+                resultadoTxt = "SIN CAMBIO (CORREGIDO)";
+                cveCptoFinal = null;
+                cantidadFinal = 0;
+            } else if (totalAjuste > totalMerma) {
+                // El ajuste fue mayor
+                resultadoTxt = "AJUSTE";
+                cveCptoFinal = 10;
+                cantidadFinal = totalAjuste - totalMerma;
+            } else {
+                // La merma fue mayor
+                resultadoTxt = "MERMA";
+                cveCptoFinal = 60;
+                cantidadFinal = totalMerma - totalAjuste;
+            }
+
+            return {
+                CVE_ART: clave,
+                REFER: refer.trim(),
+                CVE_CPTO: cveCptoFinal,
+                COSTO: primerRegistro.COSTO,
+                CANT: cantidadFinal,
+                FAMILIA: primerRegistro.FAMILIA || "",
+                GENERO: primerRegistro.GENERO || "",
+                CATEGORIA: primerRegistro.CATEGORIA || "",
+                RESULTADO: resultadoTxt
+            };
         });
 
-        // 4. Enviar respuesta exitosa
         return res.json(respuestaFinal);
 
     } catch (error) {
