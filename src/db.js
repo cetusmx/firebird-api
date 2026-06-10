@@ -21,7 +21,7 @@ const options = {
 }); */
 // ------------------------------
 
-const pool = Firebird.pool(5, options); // El 5 es el tamaño del pool
+const pool = Firebird.pool(15, options); // El 5 es el tamaño del pool
 
 module.exports = {
   query: (sql, params = []) => {

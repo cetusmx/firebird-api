@@ -12,7 +12,7 @@ const options = {
   charset: 'UTF8'
 };
 
-const pool = Firebird.pool(5, options);
+const pool = Firebird.pool(15, options);
 
 module.exports = {
   query: (sql, params = []) => {
