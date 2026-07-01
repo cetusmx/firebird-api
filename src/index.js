@@ -1236,7 +1236,7 @@ app.get('/clavesalternas/filter', async (req, res) => {
  * 1. GET /api/clavesalternas/filter-v2
  * Búsqueda Exacta / Cercana (Tolerancia 0.001) que soporta múltiples perfiles separados por coma.
  */
-app.get('/api/clavesalternas/filter-v2', async (req, res) => {
+app.get('/clavesalternas/filter-v2', async (req, res) => {
   const { 
     lista_precios, SUCURSAL, familia, sist_med, perfil, linea, limit, offset 
   } = req.query;
@@ -1358,7 +1358,7 @@ app.get('/api/clavesalternas/filter-v2', async (req, res) => {
  * 2. GET /api/clavesalternas/filter-ranges-v2
  * Búsqueda Acotada por Rangos de Tolerancia (>= min AND <= max) con soporte de múltiples perfiles.
  */
-app.get('/api/clavesalternas/filter-ranges-v2', async (req, res) => {
+app.get('/clavesalternas/filter-ranges-v2', async (req, res) => {
   const { 
     lista_precios, SUCURSAL, familia, sist_med, perfil, linea,
     diam_int_min, diam_int_max, diam_ext_min, diam_ext_max, altura_min, altura_max, seccion_min, seccion_max,
