@@ -47,7 +47,7 @@ router.get('/jerarquia', async (req, res) => {
 
     const limpioFamilia = familia.trim().toUpperCase();
 
-    // CORRECCIÓN: Quitamos el TRIM del ON y robustecemos los filtros de textos vacíos
+    // CORRECCIÓN: Apuntar a CAMPLIB24 que es donde reside la familia activa de tus productos
     const sql = `
         SELECT DISTINCT
             TRIM(I.LIN_PROD) as "LINEA",
@@ -55,7 +55,7 @@ router.get('/jerarquia', async (req, res) => {
         FROM INVE02 I
         INNER JOIN INVE_CLIB02 C ON I.CVE_ART = C.CVE_PROD
         WHERE I.STATUS = 'A'
-          AND UPPER(TRIM(C.CAMPLIB22)) = CAST(? AS VARCHAR(100))
+          AND UPPER(TRIM(C.CAMPLIB24)) = CAST(? AS VARCHAR(100))
           AND I.LIN_PROD IS NOT NULL 
           AND TRIM(I.LIN_PROD) <> ''
           AND C.CAMPLIB13 IS NOT NULL 
@@ -66,9 +66,8 @@ router.get('/jerarquia', async (req, res) => {
     try {
         const rows = await db.query(sql, [limpioFamilia]);
 
-        // Si sigue viniendo vacío, podemos retornar un mensaje de guía útil para desarrollo
         if (rows.length === 0) {
-            console.log(`[!] Jerarquía vacía para la familia: ${limpioFamilia}. Verifica si los productos activos tienen Línea y Perfil (CAMPLIB13) asignados.`);
+            console.log(`[!] Jerarquía vacía para la familia (CAMPLIB24): ${limpioFamilia}. Verifica si los productos activos tienen Línea y Perfil asignados.`);
         }
 
         const lineasMap = {};
