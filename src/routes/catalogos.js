@@ -34,7 +34,6 @@ router.get('/almacenes', async (req, res) => {
 /**
  * GET /api/catalogos/jerarquia
  * Retorna las líneas y sus perfiles asociados filtrados por una familia específica.
- * Ejemplo: /api/catalogos/jerarquia?familia=BUFFER VASTAGO
  */
 router.get('/jerarquia', async (req, res) => {
     const { familia } = req.query;
@@ -48,24 +47,30 @@ router.get('/jerarquia', async (req, res) => {
 
     const limpioFamilia = familia.trim().toUpperCase();
 
-    // Consulta SQL optimizada para traer combinaciones únicas de línea y perfil
+    // CORRECCIÓN: Quitamos el TRIM del ON y robustecemos los filtros de textos vacíos
     const sql = `
         SELECT DISTINCT
             TRIM(I.LIN_PROD) as "LINEA",
             TRIM(C.CAMPLIB13) as "PERFIL"
         FROM INVE02 I
-        INNER JOIN INVE_CLIB02 C ON TRIM(I.CVE_ART) = TRIM(C.CVE_PROD)
+        INNER JOIN INVE_CLIB02 C ON I.CVE_ART = C.CVE_PROD
         WHERE I.STATUS = 'A'
           AND UPPER(TRIM(C.CAMPLIB22)) = CAST(? AS VARCHAR(100))
-          AND I.LIN_PROD IS NOT NULL AND I.LIN_PROD <> ''
-          AND C.CAMPLIB13 IS NOT NULL AND C.CAMPLIB13 <> ''
+          AND I.LIN_PROD IS NOT NULL 
+          AND TRIM(I.LIN_PROD) <> ''
+          AND C.CAMPLIB13 IS NOT NULL 
+          AND TRIM(C.CAMPLIB13) <> ''
         ORDER BY "LINEA" ASC, "PERFIL" ASC
     `;
 
     try {
         const rows = await db.query(sql, [limpioFamilia]);
 
-        // Estructuración de la jerarquía plana de la BD a un JSON anidado limpio
+        // Si sigue viniendo vacío, podemos retornar un mensaje de guía útil para desarrollo
+        if (rows.length === 0) {
+            console.log(`[!] Jerarquía vacía para la familia: ${limpioFamilia}. Verifica si los productos activos tienen Línea y Perfil (CAMPLIB13) asignados.`);
+        }
+
         const lineasMap = {};
 
         rows.forEach(row => {
@@ -75,13 +80,11 @@ router.get('/jerarquia', async (req, res) => {
             if (!lineasMap[linea]) {
                 lineasMap[linea] = [];
             }
-            // Evitamos duplicados por si acaso
             if (!lineasMap[linea].includes(perfil)) {
                 lineasMap[linea].push(perfil);
             }
         });
 
-        // Convertimos el mapa en un array de objetos limpio
         const resultadoJerarquia = Object.entries(lineasMap).map(([linea, perfiles]) => ({
             linea,
             perfiles
