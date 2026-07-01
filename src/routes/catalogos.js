@@ -33,10 +33,12 @@ router.get('/almacenes', async (req, res) => {
 
 /**
  * GET /api/catalogos/jerarquia
- * Retorna las líneas y sus perfiles asociados filtrados por una familia específica.
+ * Retorna las líneas y sus perfiles asociados filtrados por una familia específica (CAMPLIB24)
+ * y opcionalmente acotado por su sistema de medición (CAMPLIB17).
+ * * Ejemplo de llamada: /api/catalogos/jerarquia?familia=LIMPIADORES&sist_med=MM
  */
 router.get('/jerarquia', async (req, res) => {
-    const { familia } = req.query;
+    const { familia, sist_med } = req.query;
 
     if (!familia) {
         return res.status(400).json({ 
@@ -47,8 +49,8 @@ router.get('/jerarquia', async (req, res) => {
 
     const limpioFamilia = familia.trim().toUpperCase();
 
-    // CORRECCIÓN: Apuntar a CAMPLIB24 que es donde reside la familia activa de tus productos
-    const sql = `
+    // Consulta base uniendo inventario y campos libres apuntando a la familia activa (CAMPLIB24)
+    let sql = `
         SELECT DISTINCT
             TRIM(I.LIN_PROD) as "LINEA",
             TRIM(C.CAMPLIB13) as "PERFIL"
@@ -60,15 +62,21 @@ router.get('/jerarquia', async (req, res) => {
           AND TRIM(I.LIN_PROD) <> ''
           AND C.CAMPLIB13 IS NOT NULL 
           AND TRIM(C.CAMPLIB13) <> ''
-        ORDER BY "LINEA" ASC, "PERFIL" ASC
     `;
 
-    try {
-        const rows = await db.query(sql, [limpioFamilia]);
+    const params = [limpioFamilia];
 
-        if (rows.length === 0) {
-            console.log(`[!] Jerarquía vacía para la familia (CAMPLIB24): ${limpioFamilia}. Verifica si los productos activos tienen Línea y Perfil asignados.`);
-        }
+    // CORRECCIÓN/MEJORA: Si se proporciona el sistema de medición, inyectamos el filtro de CAMPLIB17
+    if (sist_med) {
+        sql += ` AND UPPER(TRIM(C.CAMPLIB17)) = CAST(? AS VARCHAR(50)) `;
+        params.push(sist_med.trim().toUpperCase());
+    }
+
+    // Cerramos el ordenamiento reglamentario
+    sql += ` ORDER BY "LINEA" ASC, "PERFIL" ASC `;
+
+    try {
+        const rows = await db.query(sql, params);
 
         const lineasMap = {};
 
