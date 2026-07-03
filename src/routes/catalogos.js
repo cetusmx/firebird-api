@@ -232,4 +232,134 @@ router.get('/sugerencias', async (req, res) => {
     }
 });
 
+/**
+ * GET /api/catalogos/sugerencias-v2
+ * Endpoint inteligente de autocompletado cruzado V2.
+ * Añade soporte para perfiles y líneas, manteniendo la exclusión inteligente de opciones.
+ */
+router.get('/sugerencias-v2', async (req, res) => {
+    const { familia, sist_med, perfiles, diam_int, diam_ext, altura, seccion } = req.query;
+
+    if (!familia || !sist_med) {
+        return res.status(400).json({
+            error: "Parámetros requeridos",
+            detalle: "Se requiere obligatoriamente 'familia' y 'sist_med'."
+        });
+    }
+
+    const limpioFamilia = familia.trim().toUpperCase();
+    const limpioSistMed = sist_med.trim().toUpperCase();
+
+    // 1. Consulta base: Extraemos todo el universo de esa familia y sistema
+    // No filtramos por 'perfiles' en SQL para permitir que Node haga la sugerencia cruzada de perfiles alternativos.
+    const sql = `
+        SELECT 
+            TRIM(C.CAMPLIB1) as "DI",
+            TRIM(C.CAMPLIB2) as "DE",
+            TRIM(C.CAMPLIB3) as "ALT",
+            TRIM(C.CAMPLIB7) as "SEC",
+            TRIM(C.CAMPLIB13) as "PERFIL",
+            TRIM(I.LIN_PROD) as "LINEA"
+        FROM INVE02 I
+        INNER JOIN INVE_CLIB02 C ON I.CVE_ART = C.CVE_PROD
+        WHERE I.STATUS = 'A'
+          AND UPPER(TRIM(C.CAMPLIB24)) = CAST(? AS VARCHAR(100))
+          AND UPPER(TRIM(C.CAMPLIB17)) = CAST(? AS VARCHAR(50))
+    `;
+
+    try {
+        const rows = await db.query(sql, [limpioFamilia, limpioSistMed]); //
+
+        // 2. Normalización de datos numéricos y de texto en memoria
+        const parseDim = (val) => {
+            if (!val) return null;
+            const num = parseFloat(val.replace(',', '.')); // Soporte nativo para comas decimales SAE
+            return isNaN(num) ? null : num;
+        };
+
+        const registros = rows.map(r => ({
+            di: parseDim(r.DI),
+            de: parseDim(r.DE),
+            alt: parseDim(r.ALT),
+            sec: parseDim(r.SEC),
+            perfil: r.PERFIL ? r.PERFIL.trim().toUpperCase() : null,
+            linea: r.LINEA ? r.LINEA.trim().toUpperCase() : null
+        }));
+
+        // 3. Parsear inputs actuales enviados por el usuario
+        const targetDi = diam_int ? parseFloat(String(diam_int).replace(',', '.')) : null;
+        const targetDe = diam_ext ? parseFloat(String(diam_ext).replace(',', '.')) : null;
+        const targetAlt = altura ? parseFloat(String(altura).replace(',', '.')) : null;
+        const targetSec = seccion ? parseFloat(String(seccion).replace(',', '.')) : null;
+        
+        const targetPerfiles = perfiles 
+            ? perfiles.split(',').map(p => p.trim().toUpperCase()).filter(p => p !== '') 
+            : null;
+
+        // Funciones booleanas de validación
+        const cumpleDim = (valRow, valTarget) => {
+            if (valTarget === null || isNaN(valTarget)) return true; // Sin filtro activo
+            if (valRow === null) return false;
+            return Math.abs(valRow - valTarget) < 0.001; // Tolerancia de error de coma flotante
+        };
+
+        const cumplePerfil = (valRow, arrTarget) => {
+            if (!arrTarget || arrTarget.length === 0) return true; // Sin filtro activo
+            if (!valRow) return false;
+            return arrTarget.includes(valRow);
+        };
+
+        // 4. Sets para garantizar valores únicos automáticamente
+        const setDi = new Set();
+        const setDe = new Set();
+        const setAlt = new Set();
+        const setSec = new Set();
+        const setPerfiles = new Set();
+        const setLineas = new Set();
+
+        // 5. Magia del Filtrado Cruzado Auto-Excluyente
+        registros.forEach(row => {
+            const matchDi = cumpleDim(row.di, targetDi);
+            const matchDe = cumpleDim(row.de, targetDe);
+            const matchAlt = cumpleDim(row.alt, targetAlt);
+            const matchSec = cumpleDim(row.sec, targetSec);
+            const matchPerf = cumplePerfil(row.perfil, targetPerfiles);
+
+            // Cada set requiere que todos los DEMÁS filtros coincidan
+            if (matchDe && matchAlt && matchSec && matchPerf && row.di !== null) setDi.add(row.di);
+            
+            if (matchDi && matchAlt && matchSec && matchPerf && row.de !== null) setDe.add(row.de);
+            
+            if (matchDi && matchDe && matchSec && matchPerf && row.alt !== null) setAlt.add(row.alt);
+            
+            if (matchDi && matchDe && matchAlt && matchPerf && row.sec !== null) setSec.add(row.sec);
+            
+            if (matchDi && matchDe && matchAlt && matchSec && row.perfil !== null) setPerfiles.add(row.perfil);
+            
+            // La línea no es un input filtrable de esta etapa, por ende exige coincidencia absoluta de todos
+            if (matchDi && matchDe && matchAlt && matchSec && matchPerf && row.linea !== null) setLineas.add(row.linea);
+        });
+
+        // 6. Ordenamiento y Respuesta
+        const ordenarNum = (a, b) => a - b;
+        const ordenarStr = (a, b) => a.localeCompare(b);
+
+        res.json({
+            opciones_di: Array.from(setDi).sort(ordenarNum),
+            opciones_de: Array.from(setDe).sort(ordenarNum),
+            opciones_altura: Array.from(setAlt).sort(ordenarNum),
+            opciones_seccion: Array.from(setSec).sort(ordenarNum),
+            opciones_perfiles: Array.from(setPerfiles).sort(ordenarStr),
+            opciones_lineas: Array.from(setLineas).sort(ordenarStr)
+        });
+
+    } catch (error) {
+        console.error("Error en /sugerencias-v2:", error.message);
+        res.status(500).json({
+            error: "Error interno del servidor",
+            detalle: error.message
+        });
+    }
+});
+
 module.exports = router;
