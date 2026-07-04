@@ -1352,7 +1352,7 @@ app.get('/api/clavesalternas/filter-ranges-v2', async (req, res) => {
  * 2. GET /api/clavesalternas/filter-ranges-v2
  * Búsqueda Acotada por Rangos de Tolerancia (>= min AND <= max) con soporte de múltiples perfiles.
  */
-app.get('/clavesalternas/filter-ranges-v2', async (req, res) => {
+/* app.get('/clavesalternas/filter-ranges-v2', async (req, res) => {
   const { 
     lista_precios, SUCURSAL, familia, sist_med, perfil, linea,
     diam_int_min, diam_int_max, diam_ext_min, diam_ext_max, altura_min, altura_max, seccion_min, seccion_max,
@@ -1480,7 +1480,7 @@ app.get('/clavesalternas/filter-ranges-v2', async (req, res) => {
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
-});
+}); */
 
 app.get('/clavesalternas/catalogo', async (req, res) => {
   const { lista_precios, SUCURSAL, limit, offset } = req.query;
