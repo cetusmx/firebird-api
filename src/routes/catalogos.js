@@ -434,9 +434,14 @@ router.get('/sugerencias-v2', async (req, res) => {
         const targetAlt = altura ? parseFloat(String(altura).replace(',', '.')) : null;
         const targetSec = seccion ? parseFloat(String(seccion).replace(',', '.')) : null;
         
-        const targetPerfiles = perfiles 
-            ? perfiles.split(',').map(p => p.trim().toUpperCase()).filter(p => p !== '') 
-            : null;
+        // Limpieza profunda: neutraliza arrays de Express, comillas dobles, simples y espacios
+        let targetPerfiles = null;
+        if (perfiles) {
+            const strPerfiles = Array.isArray(perfiles) ? perfiles.join(',') : String(perfiles);
+            targetPerfiles = strPerfiles.split(',')
+                .map(p => p.replace(/['"]/g, '').trim().toUpperCase())
+                .filter(p => p !== '');
+        }
 
         // Funciones booleanas de validación con tolerancia de Epsilon
         const cumpleDim = (valRow, valTarget) => {

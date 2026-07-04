@@ -1267,10 +1267,16 @@ app.get('/clavesalternas/filter-v2', async (req, res) => {
     }
   }
 
-  // 2. Filtro de Familia (CAMPLIB24)
+  // 2. Filtro de Familia (CAMPLIB24) con Unificación de Sellos
   if (familia) {
-    whereClauses.push(`UPPER(TRIM(COALESCE(T4.CAMPLIB24, ''))) = UPPER(TRIM(?))`);
-    params.push(familia);
+    const limpioFamilia = familia.trim().toUpperCase();
+    
+    if (limpioFamilia === 'SELLOS U' || limpioFamilia === 'SELLOS DE VASTAGO') {
+      whereClauses.push(`UPPER(TRIM(COALESCE(T4.CAMPLIB24, ''))) IN ('SELLOS U', 'SELLOS DE VASTAGO')`);
+    } else {
+      whereClauses.push(`UPPER(TRIM(COALESCE(T4.CAMPLIB24, ''))) = UPPER(TRIM(?))`);
+      params.push(familia); // Aquí sí inyectamos el parámetro normal
+    }
   }
 
   // 3. Filtro de Sistema de Medición (CAMPLIB17)
@@ -1393,10 +1399,16 @@ app.get('/clavesalternas/filter-ranges-v2', async (req, res) => {
     }
   });
 
-  // 2. Filtro de Familia (CAMPLIB24)
+  // 2. Filtro de Familia (CAMPLIB24) con Unificación de Sellos
   if (familia) {
-    whereClauses.push(`UPPER(TRIM(COALESCE(T4.CAMPLIB24, ''))) = UPPER(TRIM(?))`);
-    params.push(familia);
+    const limpioFamilia = familia.trim().toUpperCase();
+    
+    if (limpioFamilia === 'SELLOS U' || limpioFamilia === 'SELLOS DE VASTAGO') {
+      whereClauses.push(`UPPER(TRIM(COALESCE(T4.CAMPLIB24, ''))) IN ('SELLOS U', 'SELLOS DE VASTAGO')`);
+    } else {
+      whereClauses.push(`UPPER(TRIM(COALESCE(T4.CAMPLIB24, ''))) = UPPER(TRIM(?))`);
+      params.push(familia); // Aquí sí inyectamos el parámetro normal
+    }
   }
 
   // 3. Filtro de Sistema de Medición (CAMPLIB17)
