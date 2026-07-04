@@ -37,7 +37,7 @@ router.get('/almacenes', async (req, res) => {
  * y opcionalmente acotado por su sistema de medición (CAMPLIB17).
  * * Ejemplo de llamada: /api/catalogos/jerarquia?familia=LIMPIADORES&sist_med=MM
  */
-router.get('/jerarquia', async (req, res) => {
+/* router.get('/jerarquia', async (req, res) => {
     const { familia, sist_med } = req.query;
 
     if (!familia) {
@@ -73,6 +73,90 @@ router.get('/jerarquia', async (req, res) => {
     }
 
     // Cerramos el ordenamiento reglamentario
+    sql += ` ORDER BY "LINEA" ASC, "PERFIL" ASC `;
+
+    try {
+        const rows = await db.query(sql, params);
+
+        const lineasMap = {};
+
+        rows.forEach(row => {
+            const linea = row.LINEA;
+            const perfil = row.PERFIL;
+
+            if (!lineasMap[linea]) {
+                lineasMap[linea] = [];
+            }
+            if (!lineasMap[linea].includes(perfil)) {
+                lineasMap[linea].push(perfil);
+            }
+        });
+
+        const resultadoJerarquia = Object.entries(lineasMap).map(([linea, perfiles]) => ({
+            linea,
+            perfiles
+        }));
+
+        res.json(resultadoJerarquia);
+
+    } catch (error) {
+        console.error("Error al obtener la jerarquía de catálogos:", error.message);
+        res.status(500).json({
+            error: "Error interno del servidor al procesar la jerarquía",
+            detalle: error.message
+        });
+    }
+}); */
+
+/**
+ * GET /api/catalogos/jerarquia
+ * Retorna las líneas y sus perfiles asociados filtrados por una familia específica.
+ * Incluye unificación dinámica y blindada para "SELLOS U" y "SELLOS DE VASTAGO".
+ */
+router.get('/jerarquia', async (req, res) => {
+    const { familia, sist_med } = req.query;
+
+    if (!familia) {
+        return res.status(400).json({ 
+            error: "Parámetro requerido", 
+            detalle: "Debes proporcionar el parámetro 'familia' en la consulta." 
+        });
+    }
+
+    const limpioFamilia = familia.trim().toUpperCase();
+    
+    // 1. Intercepción de la regla de negocio
+    const unificarFamilias = limpioFamilia === 'SELLOS U' || limpioFamilia === 'SELLOS DE VASTAGO';
+
+    // 2. Construcción blindada del fragmento SQL para la familia (CAMPLIB24)
+    const sqlFamilia = unificarFamilias 
+        ? `UPPER(TRIM(COALESCE(C.CAMPLIB24, ''))) IN ('SELLOS U', 'SELLOS DE VASTAGO')`
+        : `UPPER(TRIM(COALESCE(C.CAMPLIB24, ''))) = CAST(? AS VARCHAR(100))`;
+
+    let sql = `
+        SELECT DISTINCT
+            TRIM(I.LIN_PROD) as "LINEA",
+            TRIM(C.CAMPLIB13) as "PERFIL"
+        FROM INVE02 I
+        INNER JOIN INVE_CLIB02 C ON I.CVE_ART = C.CVE_PROD
+        WHERE I.STATUS = 'A'
+          AND ${sqlFamilia}
+          AND I.LIN_PROD IS NOT NULL 
+          AND TRIM(I.LIN_PROD) <> ''
+          AND C.CAMPLIB13 IS NOT NULL 
+          AND TRIM(C.CAMPLIB13) <> ''
+    `;
+
+    // 3. Control dinámico de los parámetros base
+    const params = unificarFamilias ? [] : [limpioFamilia];
+
+    // 4. Si se proporciona el sistema de medición (CAMPLIB17), se inyecta su condición y parámetro
+    if (sist_med) {
+        sql += ` AND UPPER(TRIM(COALESCE(C.CAMPLIB17, ''))) = CAST(? AS VARCHAR(50)) `;
+        params.push(sist_med.trim().toUpperCase());
+    }
+
+    // Ordenamiento
     sql += ` ORDER BY "LINEA" ASC, "PERFIL" ASC `;
 
     try {
