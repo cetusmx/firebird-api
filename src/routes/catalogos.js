@@ -237,7 +237,7 @@ router.get('/sugerencias', async (req, res) => {
  * Endpoint inteligente de autocompletado cruzado V2.
  * Añade soporte para perfiles y líneas, manteniendo la exclusión inteligente de opciones.
  */
-router.get('/sugerencias-v2', async (req, res) => {
+/* router.get('/sugerencias-v2', async (req, res) => {
     const { familia, sist_med, perfiles, diam_int, diam_ext, altura, seccion } = req.query;
 
     if (!familia || !sist_med) {
@@ -341,6 +341,143 @@ router.get('/sugerencias-v2', async (req, res) => {
         });
 
         // 6. Ordenamiento y Respuesta
+        const ordenarNum = (a, b) => a - b;
+        const ordenarStr = (a, b) => a.localeCompare(b);
+
+        res.json({
+            opciones_di: Array.from(setDi).sort(ordenarNum),
+            opciones_de: Array.from(setDe).sort(ordenarNum),
+            opciones_altura: Array.from(setAlt).sort(ordenarNum),
+            opciones_seccion: Array.from(setSec).sort(ordenarNum),
+            opciones_perfiles: Array.from(setPerfiles).sort(ordenarStr),
+            opciones_lineas: Array.from(setLineas).sort(ordenarStr)
+        });
+
+    } catch (error) {
+        console.error("Error en /sugerencias-v2:", error.message);
+        res.status(500).json({
+            error: "Error interno del servidor",
+            detalle: error.message
+        });
+    }
+}); */
+
+/**
+ * GET /api/catalogos/sugerencias-v2
+ * Endpoint inteligente de autocompletado cruzado V2.
+ * Incluye unificación dinámica para "SELLOS U" y "SELLOS DE VASTAGO".
+ */
+router.get('/sugerencias-v2', async (req, res) => {
+    const { familia, sist_med, perfiles, diam_int, diam_ext, altura, seccion } = req.query;
+
+    if (!familia || !sist_med) {
+        return res.status(400).json({
+            error: "Parámetros requeridos",
+            detalle: "Se requiere obligatoriamente 'familia' y 'sist_med'."
+        });
+    }
+
+    const limpioFamilia = familia.trim().toUpperCase();
+    const limpioSistMed = sist_med.trim().toUpperCase();
+
+    // 1. Intercepción de la regla de negocio (Unificación de familias hermanas)
+    const unificarFamilias = limpioFamilia === 'SELLOS U' || limpioFamilia === 'SELLOS DE VASTAGO';
+
+    // 2. Construcción del fragmento SQL dinámico para la familia
+    const sqlFamilia = unificarFamilias 
+        ? `UPPER(TRIM(C.CAMPLIB24)) IN (CAST(? AS VARCHAR(100)), CAST(? AS VARCHAR(100)))`
+        : `UPPER(TRIM(C.CAMPLIB24)) = CAST(? AS VARCHAR(100))`;
+
+    // 3. Consulta base acoplada con el SQL dinámico
+    const sql = `
+        SELECT 
+            TRIM(C.CAMPLIB1) as "DI",
+            TRIM(C.CAMPLIB2) as "DE",
+            TRIM(C.CAMPLIB3) as "ALT",
+            TRIM(C.CAMPLIB7) as "SEC",
+            TRIM(C.CAMPLIB13) as "PERFIL",
+            TRIM(I.LIN_PROD) as "LINEA"
+        FROM INVE02 I
+        INNER JOIN INVE_CLIB02 C ON I.CVE_ART = C.CVE_PROD
+        WHERE I.STATUS = 'A'
+          AND ${sqlFamilia}
+          AND UPPER(TRIM(C.CAMPLIB17)) = CAST(? AS VARCHAR(50))
+    `;
+
+    // 4. Inyección condicional de parámetros para Firebird
+    const params = unificarFamilias 
+        ? ['SELLOS U', 'SELLOS DE VASTAGO', limpioSistMed]
+        : [limpioFamilia, limpioSistMed];
+
+    try {
+        const rows = await db.query(sql, params); //
+
+        // 5. Normalización de datos numéricos y de texto en memoria
+        const parseDim = (val) => {
+            if (!val) return null;
+            const num = parseFloat(val.replace(',', '.')); // Compatibilidad nativa para comas
+            return isNaN(num) ? null : num;
+        };
+
+        const registros = rows.map(r => ({
+            di: parseDim(r.DI),
+            de: parseDim(r.DE),
+            alt: parseDim(r.ALT),
+            sec: parseDim(r.SEC),
+            perfil: r.PERFIL ? r.PERFIL.trim().toUpperCase() : null,
+            linea: r.LINEA ? r.LINEA.trim().toUpperCase() : null
+        }));
+
+        // 6. Parsear inputs actuales enviados por el usuario
+        const targetDi = diam_int ? parseFloat(String(diam_int).replace(',', '.')) : null;
+        const targetDe = diam_ext ? parseFloat(String(diam_ext).replace(',', '.')) : null;
+        const targetAlt = altura ? parseFloat(String(altura).replace(',', '.')) : null;
+        const targetSec = seccion ? parseFloat(String(seccion).replace(',', '.')) : null;
+        
+        const targetPerfiles = perfiles 
+            ? perfiles.split(',').map(p => p.trim().toUpperCase()).filter(p => p !== '') 
+            : null;
+
+        // Funciones booleanas de validación con tolerancia de Epsilon
+        const cumpleDim = (valRow, valTarget) => {
+            if (valTarget === null || isNaN(valTarget)) return true;
+            if (valRow === null) return false;
+            return Math.abs(valRow - valTarget) < 0.001;
+        };
+
+        const cumplePerfil = (valRow, arrTarget) => {
+            if (!arrTarget || arrTarget.length === 0) return true;
+            if (!valRow) return false;
+            return arrTarget.includes(valRow);
+        };
+
+        // 7. Sets para garantizar valores únicos
+        const setDi = new Set();
+        const setDe = new Set();
+        const setAlt = new Set();
+        const setSec = new Set();
+        const setPerfiles = new Set();
+        const setLineas = new Set();
+
+        // 8. Filtrado Cruzado Auto-Excluyente
+        registros.forEach(row => {
+            const matchDi = cumpleDim(row.di, targetDi);
+            const matchDe = cumpleDim(row.de, targetDe);
+            const matchAlt = cumpleDim(row.alt, targetAlt);
+            const matchSec = cumpleDim(row.sec, targetSec);
+            const matchPerf = cumplePerfil(row.perfil, targetPerfiles);
+
+            if (matchDe && matchAlt && matchSec && matchPerf && row.di !== null) setDi.add(row.di);
+            if (matchDi && matchAlt && matchSec && matchPerf && row.de !== null) setDe.add(row.de);
+            if (matchDi && matchDe && matchSec && matchPerf && row.alt !== null) setAlt.add(row.alt);
+            if (matchDi && matchDe && matchAlt && matchPerf && row.sec !== null) setSec.add(row.sec);
+            if (matchDi && matchDe && matchAlt && matchSec && row.perfil !== null) setPerfiles.add(row.perfil);
+            
+            // La línea exige coincidencia absoluta de la selección actual
+            if (matchDi && matchDe && matchAlt && matchSec && matchPerf && row.linea !== null) setLineas.add(row.linea);
+        });
+
+        // 9. Ordenamiento y Respuesta JSON
         const ordenarNum = (a, b) => a - b;
         const ordenarStr = (a, b) => a.localeCompare(b);
 
