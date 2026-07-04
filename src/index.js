@@ -1280,23 +1280,27 @@ app.get('/clavesalternas/filter-v2', async (req, res) => {
   }
 
   // 3. Filtro de Sistema de Medición (CAMPLIB17)
+  // El usuario confirma que la data es minúscula. Respetamos tu patrón V1 de doble TRIM.
   if (sist_med) {
-    whereClauses.push(`UPPER(TRIM(COALESCE(T4.CAMPLIB17, ''))) = UPPER(TRIM(?))`);
-    params.push(sist_med);
+    whereClauses.push(`TRIM(COALESCE(T4.CAMPLIB17, '')) = TRIM(?)`);
+    // Enviamos el string en minúscula para que haga match exacto con la tabla
+    params.push(sist_med.trim().toLowerCase()); 
   }
 
   // 4. Filtro de Línea (LIN_PROD)
+  // Volvemos a tu sintaxis nativa de la V1
   if (linea) {
     whereClauses.push(`UPPER(TRIM(COALESCE(T1.LIN_PROD, ''))) = UPPER(TRIM(?))`);
     params.push(linea);
   }
 
-  // 5. NUEVO: Filtro de Múltiples Perfiles (CAMPLIB13) aplicando cláusula IN dinámicamente
+  // 5. NUEVO: Filtro de Múltiples Perfiles (CAMPLIB13) aplicando cláusulas OR dinámicamente
   if (perfil && perfil.trim() !== '') {
-    const listPerfiles = perfil.split(',').map(p => p.trim().toUpperCase()).filter(p => p !== '');
+    const listPerfiles = perfil.split(',').map(p => p.trim()).filter(p => p !== '');
     if (listPerfiles.length > 0) {
-      const placeholders = listPerfiles.map(() => 'CAST(? AS VARCHAR(50))').join(', ');
-      whereClauses.push(`UPPER(TRIM(COALESCE(T4.CAMPLIB13, ''))) IN (${placeholders})`);
+      // Usamos tu técnica V1 (UPPER y TRIM dinámico) para eludir el padding de node-firebird
+      const orConditions = listPerfiles.map(() => `UPPER(TRIM(COALESCE(T4.CAMPLIB13, ''))) = UPPER(TRIM(?))`);
+      whereClauses.push(`(${orConditions.join(' OR ')})`);
       params.push(...listPerfiles);
     }
   }
@@ -1412,23 +1416,27 @@ app.get('/clavesalternas/filter-ranges-v2', async (req, res) => {
   }
 
   // 3. Filtro de Sistema de Medición (CAMPLIB17)
+  // El usuario confirma que la data es minúscula. Respetamos tu patrón V1 de doble TRIM.
   if (sist_med) {
-    whereClauses.push(`UPPER(TRIM(COALESCE(T4.CAMPLIB17, ''))) = UPPER(TRIM(?))`);
-    params.push(sist_med);
+    whereClauses.push(`TRIM(COALESCE(T4.CAMPLIB17, '')) = TRIM(?)`);
+    // Enviamos el string en minúscula para que haga match exacto con la tabla
+    params.push(sist_med.trim().toLowerCase()); 
   }
 
   // 4. Filtro de Línea (LIN_PROD)
+  // Volvemos a tu sintaxis nativa de la V1
   if (linea) {
     whereClauses.push(`UPPER(TRIM(COALESCE(T1.LIN_PROD, ''))) = UPPER(TRIM(?))`);
     params.push(linea);
   }
 
-  // 5. NUEVO: Filtro de Múltiples Perfiles (CAMPLIB13) aplicando cláusula IN dinámicamente
+  // 5. NUEVO: Filtro de Múltiples Perfiles (CAMPLIB13) aplicando cláusulas OR dinámicamente
   if (perfil && perfil.trim() !== '') {
-    const listPerfiles = perfil.split(',').map(p => p.trim().toUpperCase()).filter(p => p !== '');
+    const listPerfiles = perfil.split(',').map(p => p.trim()).filter(p => p !== '');
     if (listPerfiles.length > 0) {
-      const placeholders = listPerfiles.map(() => 'CAST(? AS VARCHAR(50))').join(', ');
-      whereClauses.push(`UPPER(TRIM(COALESCE(T4.CAMPLIB13, ''))) IN (${placeholders})`);
+      // Usamos tu técnica V1 (UPPER y TRIM dinámico) para eludir el padding de node-firebird
+      const orConditions = listPerfiles.map(() => `UPPER(TRIM(COALESCE(T4.CAMPLIB13, ''))) = UPPER(TRIM(?))`);
+      whereClauses.push(`(${orConditions.join(' OR ')})`);
       params.push(...listPerfiles);
     }
   }
