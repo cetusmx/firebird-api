@@ -1233,75 +1233,59 @@ app.get('/clavesalternas/filter', async (req, res) => {
  */
 
 /**
- * 1. GET /api/clavesalternas/filter-v2
- * Búsqueda Exacta / Cercana (Tolerancia 0.001) que soporta múltiples perfiles separados por coma.
+ * 2. GET /api/clavesalternas/filter-ranges-v2
+ * Búsqueda Acotada por Rangos para Equivalencias.
+ * Evalúa estrictamente Familia, Sistema de Medición, y rangos de Diámetro Interior y Exterior.
  */
-app.get('/clavesalternas/filter-v2', async (req, res) => {
+app.get('/api/clavesalternas/filter-ranges-v2', async (req, res) => {
   const { 
-    lista_precios, SUCURSAL, familia, sist_med, perfil, linea, limit, offset 
+    lista_precios, SUCURSAL, familia, sist_med,
+    diam_int_min, diam_int_max, diam_ext_min, diam_ext_max,
+    limit, offset 
   } = req.query;
-  
+
   const numLimit = parseInt(limit) || 10;
   const numOffset = parseInt(offset) || 0;
 
   let whereClauses = ["1=1"];
   let params = [];
 
-  // 1. Filtros dimensionales (Exactas con tolerancia de 0.001)
-  const dimensionalFields = {
-    diam_int: 'T4.CAMPLIB1',
-    diam_ext: 'T4.CAMPLIB2',
-    altura: 'T4.CAMPLIB3',
-    seccion: 'T4.CAMPLIB7'
-  };
+  // 1. Rangos dimensionales acotados exclusivamente a DI y DE
+  const rangeFilters = [
+    { min: diam_int_min, max: diam_int_max, col: 'T4.CAMPLIB1' },
+    { min: diam_ext_min, max: diam_ext_max, col: 'T4.CAMPLIB2' }
+  ];
 
-  for (const key in dimensionalFields) {
-    const val = req.query[key];
-    if (val) {
-      const numVal = parseFloat(String(val).replace(',', '.')); // Normalización decimal
-      if (!isNaN(numVal)) {
-        const dbNum = `CAST(REPLACE(COALESCE(NULLIF(TRIM(${dimensionalFields[key]}), ''), '0'), ',', '.') AS NUMERIC(15, 4))`;
-        whereClauses.push(`ABS(${dbNum} - CAST(? AS NUMERIC(15, 4))) <= 0.001`);
-        params.push(numVal);
+  rangeFilters.forEach(filter => {
+    if (filter.min || filter.max) {
+      // Reemplazo nativo de comas por puntos para Firebird
+      const dbNum = `CAST(REPLACE(COALESCE(NULLIF(TRIM(${filter.col}), ''), '0'), ',', '.') AS NUMERIC(15, 4))`;
+      if (filter.min) {
+        whereClauses.push(`${dbNum} >= CAST(? AS NUMERIC(15, 4))`);
+        params.push(parseFloat(String(filter.min).replace(',', '.')));
+      }
+      if (filter.max) {
+        whereClauses.push(`${dbNum} <= CAST(? AS NUMERIC(15, 4))`);
+        params.push(parseFloat(String(filter.max).replace(',', '.')));
       }
     }
-  }
+  });
 
   // 2. Filtro de Familia (CAMPLIB24) con Unificación de Sellos
   if (familia) {
     const limpioFamilia = familia.trim().toUpperCase();
-    
     if (limpioFamilia === 'SELLOS U' || limpioFamilia === 'SELLOS DE VASTAGO') {
       whereClauses.push(`UPPER(TRIM(COALESCE(T4.CAMPLIB24, ''))) IN ('SELLOS U', 'SELLOS DE VASTAGO')`);
     } else {
-      whereClauses.push(`UPPER(TRIM(COALESCE(T4.CAMPLIB24, ''))) = UPPER(TRIM(?))`);
-      params.push(familia); // Aquí sí inyectamos el parámetro normal
+      whereClauses.push(`UPPER(TRIM(COALESCE(T4.CAMPLIB24, ''))) = ?`);
+      params.push(limpioFamilia);
     }
   }
 
-  // 3. Filtro de Sistema de Medición (CAMPLIB17)
-  // Evaluado en minúscula en Node.js, comparación directa en SQL
+  // 3. Filtro de Sistema de Medición (CAMPLIB17) blindado
   if (sist_med) {
     whereClauses.push(`TRIM(COALESCE(T4.CAMPLIB17, '')) = ?`);
-    params.push(sist_med.trim().toLowerCase()); 
-  }
-
-  // 4. Filtro de Línea (LIN_PROD)
-  // Evaluado en mayúscula en Node.js, comparación directa en SQL
-  if (linea) {
-    whereClauses.push(`UPPER(TRIM(COALESCE(T1.LIN_PROD, ''))) = ?`);
-    params.push(linea.trim().toUpperCase());
-  }
-
-  // 5. Filtro de Múltiples Perfiles (CAMPLIB13)
-  if (perfil && perfil.trim() !== '') {
-    const listPerfiles = perfil.split(',').map(p => p.trim().toUpperCase()).filter(p => p !== '');
-    if (listPerfiles.length > 0) {
-      // Dejamos el ? libre de funciones para evitar el colapso del driver
-      const orConditions = listPerfiles.map(() => `UPPER(TRIM(COALESCE(T4.CAMPLIB13, ''))) = ?`);
-      whereClauses.push(`(${orConditions.join(' OR ')})`);
-      params.push(...listPerfiles);
-    }
+    params.push(sist_med.trim().toLowerCase());
   }
 
   const whereString = `WHERE ${whereClauses.join(' AND ')}`;
@@ -1311,7 +1295,7 @@ app.get('/clavesalternas/filter-v2', async (req, res) => {
     const countRes = await db.query(countSql, params);
     const totalRecords = countRes[0]?.TOTAL || 0;
 
-    const sql = `
+    const dataSql = `
       SELECT FIRST ${numLimit} SKIP ${numOffset}
           T1.CVE_ART, T1.DESCR, T1.UNI_MED, T1.FCH_ULTCOM, 
           T1.ULT_COSTO AS COSTO_PROM, T1.LIN_PROD,
@@ -1333,12 +1317,12 @@ app.get('/clavesalternas/filter-v2', async (req, res) => {
       ORDER BY T1.CVE_ART;
     `;
 
-    let dataResult = await db.query(sql, params);
+    let dataResult = await db.query(dataSql, params);
     dataResult = await enrichWithPrecios(dataResult, SUCURSAL, lista_precios); //
     dataResult = await enrichWithUltimoCosto(dataResult); //
     dataResult = await enrichWithUltimoProveedorQro(dataResult); //
 
-    // Inyección de existencias de Empresa 3 (Fresnillo Almacén 10)
+    // Inyección de existencias de Empresa 3 (Fresnillo)
     if (dataResult.length > 0) {
       const ids = dataResult.map(item => item.CVE_ART.trim());
       const sql3 = `SELECT TRIM(CVE_ART) AS ART, EXIST FROM MULT03 WHERE CVE_ALM = 3 AND CVE_ART IN (${ids.map(() => '?').join(',')})`;
@@ -1349,7 +1333,7 @@ app.get('/clavesalternas/filter-v2', async (req, res) => {
     }
 
     res.json({
-      data: processExistencias(dataResult), // Mapeo de almacenes dinámicos
+      data: processExistencias(dataResult), //
       pagination: {
         currentPage: Math.floor(numOffset / numLimit) + 1,
         totalPages: Math.ceil(totalRecords / numLimit),
@@ -1361,6 +1345,7 @@ app.get('/clavesalternas/filter-v2', async (req, res) => {
     res.status(500).json({ error: error.message });
   }
 });
+
 
 
 /**
