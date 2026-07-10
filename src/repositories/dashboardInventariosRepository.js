@@ -6,6 +6,48 @@ const db = require('../db'); // Conexión a Empresa 2
  */
 const obtenerMovimientosYClasificacion = async (refer, productos) => {
     const dbResults = [];
+    const chunkSize = 200; // Reducido para evitar error -204 de Firebird
+    
+    // Limpieza de espacios para evitar fallos de strings binarios en Firebird
+    const cleanedClaves = productos.map(p => String(p).trim());
+
+    for (let i = 0; i < cleanedClaves.length; i += chunkSize) {
+        const chunk = cleanedClaves.slice(i, i + chunkSize);
+        const placeholders = chunk.map(() => '?').join(',');
+
+        // TRIM() en el JOIN y en el WHERE para que Firebird pueda emparejar las claves correctamente
+        const sql = `
+            SELECT 
+                TRIM(C.CVE_PROD) as "CVE_ART",
+                TRIM(M.REFER) as "REFER",
+                M.CVE_CPTO as "CVE_CPTO",
+                M.COSTO as "COSTO",
+                M.CANT as "CANT",
+                TRIM(C.CAMPLIB22) as "FAMILIA",
+                TRIM(C.CAMPLIB21) as "GENERO",
+                TRIM(C.CAMPLIB24) as "CATEGORIA"
+            FROM INVE_CLIB02 C
+            LEFT JOIN MINVE02 M ON TRIM(M.CVE_ART) = TRIM(C.CVE_PROD) 
+                                AND TRIM(M.REFER) = ? 
+                                AND M.CVE_CPTO IN (10, 60)
+            WHERE TRIM(C.CVE_PROD) IN (${placeholders})
+        `;
+        
+        const queryParams = [refer.trim(), ...chunk];
+        const chunkRes = await db.query(sql, queryParams);
+        dbResults.push(...chunkRes);
+    }
+    console.log("Resultados: ", dbResults);
+
+    return dbResults;
+};
+
+/**
+ * Consulta a Firebird los movimientos de inventario (MINVE02) y catálogos (INVE_CLIB02)
+ * dividiendo las claves en bloques para respetar los límites de la base de datos.
+ */
+/* const obtenerMovimientosYClasificacion = async (refer, productos) => {
+    const dbResults = [];
     const chunkSize = 200; // Reducido para evitar error -204 y tener más visibilidad
     
     // Limpieza de espacios para evitar fallos de strings binarios en Firebird
@@ -84,9 +126,9 @@ const obtenerMovimientosYClasificacion = async (refer, productos) => {
         console.log('   Productos con movimientos encontrados:', productosConMovimientos.length);
         console.log('   Productos SIN movimientos:', cleanedClaves.length - productosConMovimientos.length);
     }
-    
+
     return dbResults;
-};
+}; */
 
 module.exports = {
     obtenerMovimientosYClasificacion
