@@ -14,7 +14,7 @@ const obtenerMovimientosYClasificacion = async (refer, productos) => {
     
     
     // Limpieza de espacios para evitar fallos de strings binarios en Firebird
-    const cleanedClaves = productos.map(p => String(p).trim());
+    /* const cleanedClaves = productos.map(p => String(p).trim());
 
     for (let i = 0; i < cleanedClaves.length; i += chunkSize) {
         const chunk = cleanedClaves.slice(i, i + chunkSize);
@@ -45,8 +45,41 @@ const obtenerMovimientosYClasificacion = async (refer, productos) => {
         } catch (error) {
             console.error('Error en chunk:', error.message);
         }
-    }
+    } */
 
+        // 🔧 CONSULTA DE PRUEBA CON CASO ESPECÍFICO (Igual que DBeaver)
+    const sqlPrueba = `
+        SELECT 
+            TRIM(C.CVE_PROD) as "CVE_ART",
+            TRIM(M.REFER) as "REFER",
+            M.CVE_CPTO as "CVE_CPTO",
+            M.COSTO as "COSTO",
+            M.CANT as "CANT",
+            TRIM(C.CAMPLIB22) as "FAMILIA",
+            TRIM(C.CAMPLIB21) as "GENERO",
+            TRIM(C.CAMPLIB24) as "CATEGORIA"
+        FROM INVE_CLIB02 C
+        LEFT JOIN MINVE02 M ON TRIM(M.CVE_ART) = TRIM(C.CVE_PROD) 
+                            AND TRIM(M.REFER) = ? 
+                            AND M.CVE_CPTO IN (10, 60)
+        WHERE TRIM(C.CVE_PROD) = ?
+    `;
+    
+    // Usamos los valores específicos que funcionaron en DBeaver
+    const referPrueba = '062026-1';
+    const productoPrueba = 'BMKR050608042';
+    
+    console.log('🧪 EJECUTANDO PRUEBA CON:');
+    console.log('   REFER:', referPrueba);
+    console.log('   PRODUCTO:', productoPrueba);
+    
+    const result = await db.query(sqlPrueba, [referPrueba, productoPrueba]);
+    
+    console.log('✅ RESULTADOS DE LA CONSULTA:', result.length);
+    console.log('   Datos:', JSON.stringify(result, null, 2));
+    
+    dbResults.push(...result);
+    
     return dbResults;
 };
 
