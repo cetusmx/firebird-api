@@ -36,10 +36,15 @@ const obtenerMovimientosYClasificacion = async (refer, productos) => {
                                 AND M.CVE_CPTO IN (10, 60)
             WHERE TRIM(C.CVE_PROD) IN (${placeholders})
         `;
-
+        
         const queryParams = [refer.trim(), ...chunk];
-        const chunkRes = await db.query(sql, queryParams);
-        dbResults.push(...chunkRes);
+        
+        try {
+            const chunkRes = await db.query(sql, queryParams);
+            dbResults.push(...chunkRes);
+        } catch (error) {
+            console.error('Error en chunk:', error.message);
+        }
     }
 
     return dbResults;
