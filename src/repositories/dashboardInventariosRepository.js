@@ -37,7 +37,7 @@ const obtenerMovimientosYClasificacion = async (refer, productos) => {
         const chunkRes = await db.query(sql, queryParams);
         dbResults.push(...chunkRes);
     }
-    console.log("Resultados: ", dbResults);
+    //console.log("Resultados: ", dbResults);
 
     return dbResults;
 };
