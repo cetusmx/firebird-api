@@ -6,7 +6,7 @@ const db = require('../db'); // Conexión a Empresa 2
  */
 const obtenerMovimientosYClasificacion = async (refer, productos) => {
     const dbResults = [];
-    const chunkSize = 1000;
+    const chunkSize = 200;
     
     // Limpieza de espacios para evitar fallos de strings binarios en Firebird
     const cleanedClaves = productos.map(p => String(p).trim());
