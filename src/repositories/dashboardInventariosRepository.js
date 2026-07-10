@@ -31,10 +31,10 @@ const obtenerMovimientosYClasificacion = async (refer, productos) => {
                 TRIM(C.CAMPLIB21) as "GENERO",
                 TRIM(C.CAMPLIB24) as "CATEGORIA"
             FROM INVE_CLIB02 C
-            LEFT JOIN MINVE02 M ON M.CVE_ART = C.CVE_PROD 
+            LEFT JOIN MINVE02 M ON TRIM(M.CVE_ART) = TRIM(C.CVE_PROD) 
                                 AND TRIM(M.REFER) = ? 
                                 AND M.CVE_CPTO IN (10, 60)
-            WHERE C.CVE_PROD IN (${placeholders})
+            WHERE TRIM(C.CVE_PROD) IN (${placeholders})
         `;
 
         const queryParams = [refer.trim(), ...chunk];
