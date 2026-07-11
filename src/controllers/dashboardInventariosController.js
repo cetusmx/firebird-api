@@ -63,7 +63,7 @@ const getAsertividadCiclico = async (req, res) => {
 
             if (totalAjuste === totalMerma) {
                 // Se cancelaron mutuamente (Ej: Merma de 5 y luego Ajuste de 5 para corregir)
-                resultadoTxt = "SIN CAMBIO (CORREGIDO)";
+                resultadoTxt = "SIN CAMBIO";
                 cveCptoFinal = null;
                 cantidadFinal = 0;
             } else if (totalAjuste > totalMerma) {
