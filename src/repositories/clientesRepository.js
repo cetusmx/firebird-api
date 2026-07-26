@@ -11,6 +11,7 @@ const db3 = require('../db3'); // Empresa 03 (Fresnillo)
 const buscarClientePorRFC = async (rfc, sucursal) => {
     const rfcLimpio = String(rfc).trim().toUpperCase();
 
+    // AQUÍ ESTABA EL ERROR: Faltaba la línea WHERE TRIM(UPPER(RFC)) = ?
     const sql = `
         SELECT 
             TRIM(CLAVE) as "CLAVE",
@@ -30,6 +31,7 @@ const buscarClientePorRFC = async (rfc, sucursal) => {
             TRIM(TELEFONO) as "TELEFONO",
             TRIM(STATUS) as "STATUS"
         FROM CLIE02
+        WHERE TRIM(UPPER(RFC)) = ?
     `;
 
     // Función auxiliar para inyectar el número de tabla dinámicamente
