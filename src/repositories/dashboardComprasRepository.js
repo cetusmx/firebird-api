@@ -46,7 +46,7 @@ const obtenerComprasConsolidadas = async (filtros) => {
             TRIM(C.CVE_CLPV) as "Clave Prov",
             TRIM(C.SU_REFER) as "Factura",
             C.FECHA_DOC as "Fecha",
-            C.CANT_TOT as "Subtotal",
+            C.CAN_TOT as "Subtotal",  -- CORRECCIÓN AQUÍ: CAN_TOT en lugar de CANT_TOT
             TRIM(C.OBS_COND) as "Origen",
             C.NUM_ALMA as "Almacen",
             C.IMPORTE as "Importe Total",
