@@ -12,6 +12,7 @@ const rutasCatalogos = require('./routes/catalogos');
 const rutasInventarios = require('./routes/inventarios');
 const rutasDashboardInventarios = require('./routes/dashboardInventarios');
 const rutasClientes = require('./routes/clientes');
+const rutasDashboardCompras = require('./routes/dashboardCompras');
 
 const app = express();
 const port = process.env.API_PORT || 3010;
@@ -79,6 +80,8 @@ app.use('/api', rutasInventarios);
 app.use('/api/dashboard-inventarios', rutasDashboardInventarios);
 
 app.use('/api/clientes', rutasClientes);
+
+app.use('/api/dashboard-compras', rutasDashboardCompras);
 
 // Constantes de mapeo de almacenes (Sucursales)
 const ALMACENES = {
@@ -538,17 +541,7 @@ app.get('/precios', async (req, res) => {
     ORDER BY
       CVE_ART;
   `;
-  /* const sql = `
-    SELECT FIRST ${limit} SKIP ${offset}
-      CVE_ART,
-      PRECIO
-    FROM
-      PRECIO_X_PROD02
-    WHERE
-      CVE_PRECIO = 1
-    ORDER BY
-      CVE_ART;
-  `; */
+
 
   try {
     const precios = await db.query(sql);
