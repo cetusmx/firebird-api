@@ -1,21 +1,35 @@
-const db = require('../db');   
-const db3 = require('../db3'); 
+const db = require('../db');   // Empresa 2
+const db3 = require('../db3'); // Empresa 3
 
+/**
+ * Consulta las compras consolidadas con detalles de inventario y catálogos.
+ * OPTIMIZADO: Utiliza BETWEEN para fechas para aprovechar los índices de Firebird.
+ */
 const obtenerComprasConsolidadas = async (filtros) => {
-    console.log(`[REPO-START] Iniciando consulta con filtros:`, filtros);
+    // console.log(`[REPO-START] Iniciando consulta con filtros:`, filtros);
     
     const { mes, anio, almacen, linea, perfil, genero, familia } = filtros;
-    let whereClauses = ["C.STATUS <> 'C'"];
+    
+    let whereClauses = ["C.STATUS <> 'C'"]; // Excluir canceladas
     let params = [];
 
-    if (mes) {
-        whereClauses.push("EXTRACT(MONTH FROM C.FECHA_DOC) = ?");
-        params.push(mes);
+    // Filtros de fecha optimizados para usar índices en Firebird
+    if (mes && anio) {
+        // Formatear mes a dos dígitos (ej. 8 -> '08')
+        const mesStr = String(mes).padStart(2, '0');
+        
+        // JS Date: Al pedir el día 0 del mes siguiente, nos da el último día del mes actual
+        const ultimoDia = new Date(anio, mes, 0).getDate(); 
+        
+        // Formato AAAA-MM-DD HH:MM:SS para asegurar cobertura total del día
+        const fechaInicio = `${anio}-${mesStr}-01 00:00:00`;
+        const fechaFin = `${anio}-${mesStr}-${ultimoDia} 23:59:59`;
+
+        whereClauses.push("C.FECHA_DOC BETWEEN ? AND ?");
+        params.push(fechaInicio, fechaFin);
     }
-    if (anio) {
-        whereClauses.push("EXTRACT(YEAR FROM C.FECHA_DOC) = ?");
-        params.push(anio);
-    }
+
+    // Filtros dinámicos de producto
     if (linea) {
         whereClauses.push("TRIM(I.LIN_PROD) = ?");
         params.push(String(linea).trim().toUpperCase());
@@ -41,7 +55,7 @@ const obtenerComprasConsolidadas = async (filtros) => {
             TRIM(C.CVE_CLPV) as "Clave Prov",
             TRIM(C.SU_REFER) as "Factura",
             C.FECHA_DOC as "Fecha",
-            C.CAN_TOT as "Subtotal", 
+            C.CAN_TOT as "Subtotal",
             TRIM(C.OBS_COND) as "Origen",
             C.NUM_ALMA as "Almacen",
             C.IMPORTE as "Importe Total",
@@ -61,6 +75,7 @@ const obtenerComprasConsolidadas = async (filtros) => {
         ${whereString}
     `;
 
+    // Función para cambiar el número de tabla según la empresa
     const buildSql = (sufijo) => {
         return sql
             .replace(/COMPC02/g, `COMPC${sufijo}`)
@@ -69,40 +84,29 @@ const obtenerComprasConsolidadas = async (filtros) => {
             .replace(/INVE_CLIB02/g, `INVE_CLIB${sufijo}`);
     };
 
-    console.log(`[REPO-SQL] Query generado. Parámetros a inyectar:`, params);
-    console.log(`[REPO-SQL] Lanzando consultas a DB2 y DB3 en paralelo...`);
+    // Ejecutamos ambas bases de datos en paralelo
+    const [res2, res3] = await Promise.all([
+        db.query(buildSql('02'), params),
+        db3.query(buildSql('03'), params)
+    ]);
 
-    // Aislamos las promesas para ver cuál de las dos bases de datos se queda colgada
-    const consultaEmpresa2 = db.query(buildSql('02'), params)
-        .then(res => {
-            console.log(`[REPO-DB2] ✅ Respondió Empresa 2 con ${res.length} registros.`);
-            return res;
-        }).catch(err => {
-            console.error(`[REPO-DB2] ❌ Error en Empresa 2:`, err);
-            throw err;
-        });
+    // Forzamos el Almacén 3 para los resultados de Fresnillo (Empresa 3)
+    const res3Mapeado = res3.map(row => ({
+        ...row,
+        Almacen: 3
+    }));
 
-    const consultaEmpresa3 = db3.query(buildSql('03'), params)
-        .then(res => {
-            console.log(`[REPO-DB3] ✅ Respondió Empresa 3 con ${res.length} registros.`);
-            return res;
-        }).catch(err => {
-            console.error(`[REPO-DB3] ❌ Error en Empresa 3:`, err);
-            throw err;
-        });
-
-    const [res2, res3] = await Promise.all([consultaEmpresa2, consultaEmpresa3]);
-
-    console.log(`[REPO-MERGE] Ambas BD respondieron. Mapeando Empresa 3...`);
-    const res3Mapeado = res3.map(row => ({ ...row, Almacen: 3 }));
     let consolidados = [...res2, ...res3Mapeado];
 
+    // Si el usuario solicitó un almacén específico por filtro, lo aplicamos en memoria
     if (almacen) {
         consolidados = consolidados.filter(r => String(r.Almacen) === String(almacen));
     }
 
-    console.log(`[REPO-END] Finalizando con ${consolidados.length} registros consolidados.`);
+    // console.log(`[REPO-END] Finalizando con ${consolidados.length} registros consolidados.`);
     return consolidados;
 };
 
-module.exports = { obtenerComprasConsolidadas };
+module.exports = {
+    obtenerComprasConsolidadas
+};
