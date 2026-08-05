@@ -1,16 +1,13 @@
-const db = require('../db');   // Empresa 2
-const db3 = require('../db3'); // Empresa 3
+const db = require('../db');   
+const db3 = require('../db3'); 
 
-/**
- * Consulta las compras consolidadas con detalles de inventario y catálogos.
- */
 const obtenerComprasConsolidadas = async (filtros) => {
-    const { mes, anio, almacen, linea, perfil, genero, familia } = filtros;
+    console.log(`[REPO-START] Iniciando consulta con filtros:`, filtros);
     
-    let whereClauses = ["C.STATUS <> 'C'"]; // Excluir canceladas
+    const { mes, anio, almacen, linea, perfil, genero, familia } = filtros;
+    let whereClauses = ["C.STATUS <> 'C'"];
     let params = [];
 
-    // Filtros de fecha (Obligatorios para no colapsar la BD)
     if (mes) {
         whereClauses.push("EXTRACT(MONTH FROM C.FECHA_DOC) = ?");
         params.push(mes);
@@ -19,8 +16,6 @@ const obtenerComprasConsolidadas = async (filtros) => {
         whereClauses.push("EXTRACT(YEAR FROM C.FECHA_DOC) = ?");
         params.push(anio);
     }
-
-    // Filtros dinámicos de producto
     if (linea) {
         whereClauses.push("TRIM(I.LIN_PROD) = ?");
         params.push(String(linea).trim().toUpperCase());
@@ -46,7 +41,7 @@ const obtenerComprasConsolidadas = async (filtros) => {
             TRIM(C.CVE_CLPV) as "Clave Prov",
             TRIM(C.SU_REFER) as "Factura",
             C.FECHA_DOC as "Fecha",
-            C.CAN_TOT as "Subtotal",  -- CORRECCIÓN AQUÍ: CAN_TOT en lugar de CANT_TOT
+            C.CAN_TOT as "Subtotal", 
             TRIM(C.OBS_COND) as "Origen",
             C.NUM_ALMA as "Almacen",
             C.IMPORTE as "Importe Total",
@@ -66,7 +61,6 @@ const obtenerComprasConsolidadas = async (filtros) => {
         ${whereString}
     `;
 
-    // Función para cambiar el número de tabla según la empresa
     const buildSql = (sufijo) => {
         return sql
             .replace(/COMPC02/g, `COMPC${sufijo}`)
@@ -75,28 +69,40 @@ const obtenerComprasConsolidadas = async (filtros) => {
             .replace(/INVE_CLIB02/g, `INVE_CLIB${sufijo}`);
     };
 
-    // Ejecutamos ambas bases de datos en paralelo
-    const [res2, res3] = await Promise.all([
-        db.query(buildSql('02'), params),
-        db3.query(buildSql('03'), params)
-    ]);
+    console.log(`[REPO-SQL] Query generado. Parámetros a inyectar:`, params);
+    console.log(`[REPO-SQL] Lanzando consultas a DB2 y DB3 en paralelo...`);
 
-    // Forzamos el Almacén 3 para los resultados de Fresnillo (Empresa 3)
-    const res3Mapeado = res3.map(row => ({
-        ...row,
-        Almacen: 3
-    }));
+    // Aislamos las promesas para ver cuál de las dos bases de datos se queda colgada
+    const consultaEmpresa2 = db.query(buildSql('02'), params)
+        .then(res => {
+            console.log(`[REPO-DB2] ✅ Respondió Empresa 2 con ${res.length} registros.`);
+            return res;
+        }).catch(err => {
+            console.error(`[REPO-DB2] ❌ Error en Empresa 2:`, err);
+            throw err;
+        });
 
+    const consultaEmpresa3 = db3.query(buildSql('03'), params)
+        .then(res => {
+            console.log(`[REPO-DB3] ✅ Respondió Empresa 3 con ${res.length} registros.`);
+            return res;
+        }).catch(err => {
+            console.error(`[REPO-DB3] ❌ Error en Empresa 3:`, err);
+            throw err;
+        });
+
+    const [res2, res3] = await Promise.all([consultaEmpresa2, consultaEmpresa3]);
+
+    console.log(`[REPO-MERGE] Ambas BD respondieron. Mapeando Empresa 3...`);
+    const res3Mapeado = res3.map(row => ({ ...row, Almacen: 3 }));
     let consolidados = [...res2, ...res3Mapeado];
 
-    // Si el usuario solicitó un almacén específico por filtro, lo aplicamos en memoria
     if (almacen) {
         consolidados = consolidados.filter(r => String(r.Almacen) === String(almacen));
     }
 
+    console.log(`[REPO-END] Finalizando con ${consolidados.length} registros consolidados.`);
     return consolidados;
 };
 
-module.exports = {
-    obtenerComprasConsolidadas
-};
+module.exports = { obtenerComprasConsolidadas };
