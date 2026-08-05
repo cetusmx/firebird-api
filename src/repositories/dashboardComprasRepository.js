@@ -2,14 +2,15 @@ const db = require('../db');   // Empresa 2
 const db3 = require('../db3'); // Empresa 3
 
 /**
- * PRUEBA DE RENDIMIENTO: Divide y Vencerás
- * Ignora todos los filtros y extrae los 50 movimientos más recientes de compras,
- * conservando los TRIM() en las relaciones JOIN.
+ * PRUEBA DE RENDIMIENTO 2: Divide y Vencerás (Sin TRIM en los JOIN)
+ * Ignora todos los filtros y extrae los 50 movimientos más recientes.
+ * Comprobaremos si quitar el TRIM en los JOIN habilita los índices y reduce el tiempo.
  */
 const obtenerComprasConsolidadas = async () => {
-    // Hemos eliminado la inyección de parámetros/filtros para la prueba.
     
     // Agregamos FIRST 50 y ORDER BY FECHA_DOC DESC
+    // Mantenemos los TRIM en el SELECT para que el dato llegue limpio
+    // QUITAMOS los TRIM de las cláusulas ON para habilitar los índices
     const sql = `
         SELECT FIRST 50
             TRIM(C.CVE_DOC) as "Documento",
@@ -30,9 +31,9 @@ const obtenerComprasConsolidadas = async () => {
             TRIM(L.CAMPLIB21) as "Genero",
             TRIM(L.CAMPLIB22) as "Familia"
         FROM COMPC02 C
-        INNER JOIN MINVE02 M ON TRIM(M.REFER) = TRIM(C.CVE_DOC)
-        LEFT JOIN INVE02 I ON TRIM(I.CVE_ART) = TRIM(M.CVE_ART)
-        LEFT JOIN INVE_CLIB02 L ON TRIM(L.CVE_PROD) = TRIM(M.CVE_ART)
+        INNER JOIN MINVE02 M ON M.REFER = C.CVE_DOC
+        LEFT JOIN INVE02 I ON I.CVE_ART = M.CVE_ART
+        LEFT JOIN INVE_CLIB02 L ON L.CVE_PROD = M.CVE_ART
         WHERE C.STATUS <> 'C'
         ORDER BY C.FECHA_DOC DESC
     `;
@@ -46,10 +47,10 @@ const obtenerComprasConsolidadas = async () => {
             .replace(/INVE_CLIB02/g, `INVE_CLIB${sufijo}`);
     };
 
-    console.log(`[TEST-REPO] Ejecutando consulta de prueba (FIRST 50) a ambas bases de datos...`);
+    console.log(`[TEST-REPO] Ejecutando consulta de prueba (FIRST 50 SIN TRIM en JOIN)...`);
     const inicio = Date.now();
 
-    // Ejecutamos ambas bases de datos en paralelo sin parámetros
+    // Ejecutamos ambas bases de datos en paralelo
     const [res2, res3] = await Promise.all([
         db.query(buildSql('02')),
         db3.query(buildSql('03'))
@@ -64,14 +65,13 @@ const obtenerComprasConsolidadas = async () => {
         Almacen: 3
     }));
 
-    // Combinamos los resultados (50 + 50 = 100 posibles registros)
+    // Combinamos los resultados 
     let consolidados = [...res2, ...res3Mapeado];
 
-    // Ordenamos en memoria (Node.js) globalmente para asegurar que los 
-    // 50 finales sean realmente los más recientes sumando ambas empresas
+    // Ordenamos en memoria globalmente
     consolidados.sort((a, b) => new Date(b.Fecha) - new Date(a.Fecha));
 
-    // Devolvemos estrictamente los primeros 50 al controlador
+    // Devolvemos estrictamente los primeros 50
     return consolidados.slice(0, 50);
 };
 
