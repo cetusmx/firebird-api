@@ -3,12 +3,17 @@ const db3 = require('../db3'); // Empresa 3
 
 /**
  * Consulta las compras consolidadas con detalles de inventario y catálogos.
- * OPTIMIZADO: JOINs directos y Fechas por BETWEEN.
+ * OPTIMIZADO: JOINs directos, Fechas por BETWEEN y Filtro estricto por Concepto de Compra.
  */
 const obtenerComprasConsolidadas = async (filtros) => {
     const { mes, anio, almacen, linea, perfil, genero, familia } = filtros;
     
-    let whereClauses = ["C.STATUS <> 'C'"]; // Excluir canceladas
+    // AQUÍ ESTÁ EL CAMBIO:
+    // Agregamos M.CVE_CPTO = 1 para garantizar que solo traemos "Entradas por Compra"
+    let whereClauses = [
+        "C.STATUS <> 'C'", 
+        "M.CVE_CPTO = 1"
+    ]; 
     let params = [];
 
     // Filtros de fecha (Optimizados con BETWEEN para usar índices de fecha)
@@ -78,17 +83,11 @@ const obtenerComprasConsolidadas = async (filtros) => {
             .replace(/INVE_CLIB02/g, `INVE_CLIB${sufijo}`);
     };
 
-    // console.log(`[REPO-SQL] Ejecutando consulta optimizada...`);
-    // const inicio = Date.now();
-
     // Ejecutamos ambas bases de datos en paralelo
     const [res2, res3] = await Promise.all([
         db.query(buildSql('02'), params),
         db3.query(buildSql('03'), params)
     ]);
-
-    // const tiempoFin = Date.now() - inicio;
-    // console.log(`[REPO-SQL] BBDD respondieron en ${tiempoFin}ms`);
 
     // Forzamos el Almacén 3 para los resultados de Fresnillo (Empresa 3)
     const res3Mapeado = res3.map(row => ({
