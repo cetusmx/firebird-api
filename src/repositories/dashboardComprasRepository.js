@@ -2,17 +2,49 @@ const db = require('../db');   // Empresa 2
 const db3 = require('../db3'); // Empresa 3
 
 /**
- * PRUEBA DE RENDIMIENTO 2: Divide y Vencerás (Sin TRIM en los JOIN)
- * Ignora todos los filtros y extrae los 50 movimientos más recientes.
- * Comprobaremos si quitar el TRIM en los JOIN habilita los índices y reduce el tiempo.
+ * Consulta las compras consolidadas con detalles de inventario y catálogos.
+ * OPTIMIZADO: JOINs directos y Fechas por BETWEEN.
  */
-const obtenerComprasConsolidadas = async () => {
+const obtenerComprasConsolidadas = async (filtros) => {
+    const { mes, anio, almacen, linea, perfil, genero, familia } = filtros;
     
-    // Agregamos FIRST 50 y ORDER BY FECHA_DOC DESC
-    // Mantenemos los TRIM en el SELECT para que el dato llegue limpio
-    // QUITAMOS los TRIM de las cláusulas ON para habilitar los índices
+    let whereClauses = ["C.STATUS <> 'C'"]; // Excluir canceladas
+    let params = [];
+
+    // Filtros de fecha (Optimizados con BETWEEN para usar índices de fecha)
+    if (mes && anio) {
+        const mesStr = String(mes).padStart(2, '0');
+        const ultimoDia = new Date(anio, mes, 0).getDate(); 
+        
+        const fechaInicio = `${anio}-${mesStr}-01 00:00:00`;
+        const fechaFin = `${anio}-${mesStr}-${ultimoDia} 23:59:59`;
+
+        whereClauses.push("C.FECHA_DOC BETWEEN ? AND ?");
+        params.push(fechaInicio, fechaFin);
+    }
+
+    // Filtros dinámicos de producto
+    if (linea) {
+        whereClauses.push("TRIM(I.LIN_PROD) = ?");
+        params.push(String(linea).trim().toUpperCase());
+    }
+    if (perfil) {
+        whereClauses.push("TRIM(L.CAMPLIB13) = ?");
+        params.push(String(perfil).trim().toUpperCase());
+    }
+    if (genero) {
+        whereClauses.push("TRIM(L.CAMPLIB21) = ?");
+        params.push(String(genero).trim().toUpperCase());
+    }
+    if (familia) {
+        whereClauses.push("TRIM(L.CAMPLIB22) = ?");
+        params.push(String(familia).trim().toUpperCase());
+    }
+
+    const whereString = whereClauses.length > 0 ? `WHERE ${whereClauses.join(' AND ')}` : '';
+
     const sql = `
-        SELECT FIRST 50
+        SELECT 
             TRIM(C.CVE_DOC) as "Documento",
             TRIM(C.CVE_CLPV) as "Clave Prov",
             TRIM(C.SU_REFER) as "Factura",
@@ -34,8 +66,7 @@ const obtenerComprasConsolidadas = async () => {
         INNER JOIN MINVE02 M ON M.REFER = C.CVE_DOC
         LEFT JOIN INVE02 I ON I.CVE_ART = M.CVE_ART
         LEFT JOIN INVE_CLIB02 L ON L.CVE_PROD = M.CVE_ART
-        WHERE C.STATUS <> 'C'
-        ORDER BY C.FECHA_DOC DESC
+        ${whereString}
     `;
 
     // Función para cambiar el número de tabla según la empresa
@@ -47,32 +78,32 @@ const obtenerComprasConsolidadas = async () => {
             .replace(/INVE_CLIB02/g, `INVE_CLIB${sufijo}`);
     };
 
-    console.log(`[TEST-REPO] Ejecutando consulta de prueba (FIRST 50 SIN TRIM en JOIN)...`);
-    const inicio = Date.now();
+    // console.log(`[REPO-SQL] Ejecutando consulta optimizada...`);
+    // const inicio = Date.now();
 
     // Ejecutamos ambas bases de datos en paralelo
     const [res2, res3] = await Promise.all([
-        db.query(buildSql('02')),
-        db3.query(buildSql('03'))
+        db.query(buildSql('02'), params),
+        db3.query(buildSql('03'), params)
     ]);
 
-    const tiempoFin = Date.now() - inicio;
-    console.log(`[TEST-REPO] BBDD respondieron en ${tiempoFin}ms`);
+    // const tiempoFin = Date.now() - inicio;
+    // console.log(`[REPO-SQL] BBDD respondieron en ${tiempoFin}ms`);
 
-    // Forzamos el Almacén 3 para los resultados de Fresnillo
+    // Forzamos el Almacén 3 para los resultados de Fresnillo (Empresa 3)
     const res3Mapeado = res3.map(row => ({
         ...row,
         Almacen: 3
     }));
 
-    // Combinamos los resultados 
     let consolidados = [...res2, ...res3Mapeado];
 
-    // Ordenamos en memoria globalmente
-    consolidados.sort((a, b) => new Date(b.Fecha) - new Date(a.Fecha));
+    // Si el usuario solicitó un almacén específico por filtro, lo aplicamos en memoria
+    if (almacen) {
+        consolidados = consolidados.filter(r => String(r.Almacen) === String(almacen));
+    }
 
-    // Devolvemos estrictamente los primeros 50
-    return consolidados.slice(0, 50);
+    return consolidados;
 };
 
 module.exports = {
