@@ -1,6 +1,9 @@
 const repo = require('../repositories/dashboardComprasRepository');
+
+// Función auxiliar de redondeo estándar a 2 decimales
 const round2 = (num) => Math.round((num + Number.EPSILON) * 100) / 100;
 
+// Función para parsear parámetros separados por comas a arreglos limpios
 const parseQueryArray = (param) => {
     if (!param) return null;
     const str = Array.isArray(param) ? param.join(',') : String(param);
@@ -8,9 +11,16 @@ const parseQueryArray = (param) => {
     return arr.length > 0 ? arr : null;
 };
 
+/**
+ * Controlador para analizar el origen de las compras con Filtros Responsivos.
+ */
 const getAnalisisOrigenCompras = async (req, res) => {
     try {
-        const { mes, anio, almacenes, lineas, perfiles, generos, familias, page, limit } = req.query;
+        const { 
+            mes, anio, 
+            almacenes, lineas, perfiles, generos, familias, 
+            page, limit 
+        } = req.query;
 
         const now = new Date();
         const fMes = parseInt(mes) || (now.getMonth() + 1);
@@ -49,47 +59,37 @@ const getAnalisisOrigenCompras = async (req, res) => {
         };
 
         comprasUniverso.forEach(row => {
-            const docActual = row.Documento ? String(row.Documento).trim() : '';
-            const esElRastreado = docActual === 'CD2797'; // <-- Nuestro objetivo
+            // NORMALIZACIÓN DE NULOS: Convertimos vacíos en un string tangible para el filtro
+            const valAlmacen = row.Almacen ? String(row.Almacen).trim() : 'SIN ASIGNAR';
+            const valLinea = row.Línea ? String(row.Línea).trim() : 'SIN ASIGNAR';
+            const valPerfil = row.Perfil ? String(row.Perfil).trim() : 'SIN ASIGNAR';
+            const valGenero = row.Genero ? String(row.Genero).trim() : 'SIN ASIGNAR';
+            const valFamilia = row.Familia ? String(row.Familia).trim() : 'SIN ASIGNAR';
 
-            const valAlmacen = row.Almacen ? String(row.Almacen).trim() : null;
-            const valLinea = row.Línea ? String(row.Línea).trim() : null;
-            const valPerfil = row.Perfil ? String(row.Perfil).trim() : null;
-            const valGenero = row.Genero ? String(row.Genero).trim() : null;
-            const valFamilia = row.Familia ? String(row.Familia).trim() : null;
-
-            // --- DEBUGGER: Valores detectados ---
-            if (esElRastreado) {
-                console.log(`\n[CTRL-DEBUG] 🔍 Analizando partida de CD2797 (Clave: ${row.Clave}):`);
-                console.log(`   Valores: Almacen [${valAlmacen}] | Linea [${valLinea}] | Perfil [${valPerfil}] | Genero [${valGenero}] | Familia [${valFamilia}]`);
-            }
-
+            // Evaluamos si esta fila cumple con cada filtro
             const mAlmacen = cumpleFiltro(valAlmacen, targetAlmacenes);
             const mLinea = cumpleFiltro(valLinea, targetLineas);
             const mPerfil = cumpleFiltro(valPerfil, targetPerfiles);
             const mGenero = cumpleFiltro(valGenero, targetGeneros);
             const mFamilia = cumpleFiltro(valFamilia, targetFamilias);
 
-            // --- DEBUGGER: Resultado de los booleanos de coincidencia ---
-            if (esElRastreado) {
-                console.log(`   Matches: Almacen:${mAlmacen} | Linea:${mLinea} | Perfil:${mPerfil} | Genero:${mGenero} | Familia:${mFamilia}`);
-                
-                if (mAlmacen && mLinea && mPerfil && mGenero && mFamilia) {
-                    console.log(`   ✅ PASÓ. Se agregará a los datos filtrados y métricas.`);
-                } else {
-                    console.log(`   ❌ DESCARTADO. La fila no cumple con los filtros activos.`);
-                }
-            }
+            // A) POBLAR CATÁLOGOS SUGERIDOS (Filtro Responsivo)
+            if (mLinea && mPerfil && mGenero && mFamilia) setAlmacenes.add(valAlmacen);
+            if (mAlmacen && mPerfil && mGenero && mFamilia) setLineas.add(valLinea);
+            if (mAlmacen && mLinea && mGenero && mFamilia) setPerfiles.add(valPerfil);
+            if (mAlmacen && mLinea && mPerfil && mFamilia) setGeneros.add(valGenero);
+            if (mAlmacen && mLinea && mPerfil && mGenero) setFamilias.add(valFamilia);
 
-            if (mLinea && mPerfil && mGenero && mFamilia && valAlmacen) setAlmacenes.add(valAlmacen);
-            if (mAlmacen && mPerfil && mGenero && mFamilia && valLinea) setLineas.add(valLinea);
-            if (mAlmacen && mLinea && mGenero && mFamilia && valPerfil) setPerfiles.add(valPerfil);
-            if (mAlmacen && mLinea && mPerfil && mFamilia && valGenero) setGeneros.add(valGenero);
-            if (mAlmacen && mLinea && mPerfil && mGenero && valFamilia) setFamilias.add(valFamilia);
-
+            // B) RECOLECTAR DATOS Y MÉTRICAS (Coincidencia Absoluta)
             if (mAlmacen && mLinea && mPerfil && mGenero && mFamilia) {
+                // Inyectamos el valor normalizado al registro para que el frontend no rompa si espera texto
+                row.Almacen = valAlmacen;
+                row.Línea = valLinea;
+                row.Perfil = valPerfil;
+                row.Genero = valGenero;
+                row.Familia = valFamilia;
+
                 datosFiltrados.push(row);
-                
                 totalPartidas++;
                 
                 const cantidad = parseFloat(row.Cantidad) || 0;
@@ -120,7 +120,13 @@ const getAnalisisOrigenCompras = async (req, res) => {
 
         res.json({
             periodo: { mes: fMes, anio: fAnio },
-            filtros_aplicados: { almacenes: targetAlmacenes, lineas: targetLineas, perfiles: targetPerfiles, generos: targetGeneros, familias: targetFamilias },
+            filtros_aplicados: { 
+                almacenes: targetAlmacenes, 
+                lineas: targetLineas, 
+                perfiles: targetPerfiles, 
+                generos: targetGeneros, 
+                familias: targetFamilias 
+            },
             opciones_filtros: {
                 almacenes: Array.from(setAlmacenes).sort(ordenarAlfa),
                 lineas: Array.from(setLineas).sort(ordenarAlfa),
