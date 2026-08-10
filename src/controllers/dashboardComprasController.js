@@ -59,30 +59,38 @@ const getAnalisisOrigenCompras = async (req, res) => {
         };
 
         comprasUniverso.forEach(row => {
-            // NORMALIZACIÓN DE NULOS: Convertimos vacíos en un string tangible para el filtro
             const valAlmacen = row.Almacen ? String(row.Almacen).trim() : 'SIN ASIGNAR';
             const valLinea = row.Línea ? String(row.Línea).trim() : 'SIN ASIGNAR';
             const valPerfil = row.Perfil ? String(row.Perfil).trim() : 'SIN ASIGNAR';
             const valGenero = row.Genero ? String(row.Genero).trim() : 'SIN ASIGNAR';
             const valFamilia = row.Familia ? String(row.Familia).trim() : 'SIN ASIGNAR';
 
-            // Evaluamos si esta fila cumple con cada filtro
             const mAlmacen = cumpleFiltro(valAlmacen, targetAlmacenes);
             const mLinea = cumpleFiltro(valLinea, targetLineas);
             const mPerfil = cumpleFiltro(valPerfil, targetPerfiles);
             const mGenero = cumpleFiltro(valGenero, targetGeneros);
             const mFamilia = cumpleFiltro(valFamilia, targetFamilias);
 
-            // A) POBLAR CATÁLOGOS SUGERIDOS (Filtro Responsivo)
+            // A) POBLAR CATÁLOGOS SUGERIDOS
             if (mLinea && mPerfil && mGenero && mFamilia) setAlmacenes.add(valAlmacen);
             if (mAlmacen && mPerfil && mGenero && mFamilia) setLineas.add(valLinea);
             if (mAlmacen && mLinea && mGenero && mFamilia) setPerfiles.add(valPerfil);
             if (mAlmacen && mLinea && mPerfil && mFamilia) setGeneros.add(valGenero);
             if (mAlmacen && mLinea && mPerfil && mGenero) setFamilias.add(valFamilia);
 
-            // B) RECOLECTAR DATOS Y MÉTRICAS (Coincidencia Absoluta)
+            // B) RECOLECTAR DATOS Y MÉTRICAS
             if (mAlmacen && mLinea && mPerfil && mGenero && mFamilia) {
-                // Inyectamos el valor normalizado al registro para que el frontend no rompa si espera texto
+                
+                const cantidad = parseFloat(row.Cantidad) || 0;
+                const costo = parseFloat(row.Costo) || 0;
+                const montoPartida = cantidad * costo;
+
+                // --- CORRECCIÓN APLICADA AQUÍ ---
+                // Reemplazamos los totales de la factura por los totales del producto específico
+                row.Subtotal = round2(montoPartida);
+                row['Importe Total'] = round2(montoPartida * 1.16); 
+                
+                // Normalización para evitar fallos por valores vacíos en el frontend
                 row.Almacen = valAlmacen;
                 row.Línea = valLinea;
                 row.Perfil = valPerfil;
@@ -91,10 +99,6 @@ const getAnalisisOrigenCompras = async (req, res) => {
 
                 datosFiltrados.push(row);
                 totalPartidas++;
-                
-                const cantidad = parseFloat(row.Cantidad) || 0;
-                const costo = parseFloat(row.Costo) || 0;
-                const montoPartida = cantidad * costo;
                 montoTotal += montoPartida;
 
                 const origenTexto = (row.Origen || "").toUpperCase();
