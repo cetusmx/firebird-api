@@ -1,18 +1,27 @@
-const db = require('../db');   
-const db3 = require('../db3'); 
+const db = require('../db');   // Empresa 2
+const db3 = require('../db3'); // Empresa 3
 
+/**
+ * Extrae el "Universo Total" de compras consolidadas de un mes específico.
+ * OPTIMIZADO: JOINs directos, Filtro estricto por Concepto = 1 y Fechas.
+ * Nota: Los filtros dinámicos (familias, líneas) fueron removidos de SQL 
+ * para ser procesados en la memoria RAM por el Controlador (Filtros Responsivos).
+ */
 const obtenerComprasConsolidadas = async (filtros) => {
     const { mes, anio } = filtros;
     
+    // Reglas inquebrantables de negocio: Solo facturas vivas y Solo Entradas por Compra
     let whereClauses = [
         "C.STATUS <> 'C'", 
         "M.CVE_CPTO = 1"
     ]; 
     let params = [];
 
+    // Filtros de fecha obligatorios para no saturar la RAM
     if (mes && anio) {
         const mesStr = String(mes).padStart(2, '0');
         const ultimoDia = new Date(anio, mes, 0).getDate(); 
+        
         const fechaInicio = `${anio}-${mesStr}-01 00:00:00`;
         const fechaFin = `${anio}-${mesStr}-${ultimoDia} 23:59:59`;
 
@@ -48,6 +57,7 @@ const obtenerComprasConsolidadas = async (filtros) => {
         ${whereString}
     `;
 
+    // Función para inyectar el sufijo de empresa dinámicamente
     const buildSql = (sufijo) => {
         return sql
             .replace(/COMPC02/g, `COMPC${sufijo}`)
@@ -56,28 +66,22 @@ const obtenerComprasConsolidadas = async (filtros) => {
             .replace(/INVE_CLIB02/g, `INVE_CLIB${sufijo}`);
     };
 
+    // Lanzamos la consulta a ambas bases de datos simultáneamente
     const [res2, res3] = await Promise.all([
         db.query(buildSql('02'), params),
         db3.query(buildSql('03'), params)
     ]);
 
+    // Homologamos la Empresa 3 forzando el Almacén 3 (Fresnillo)
     const res3Mapeado = res3.map(row => ({
         ...row,
         Almacen: 3
     }));
 
-    const consolidados = [...res2, ...res3Mapeado];
-
-    // --- DEBUGGER INYECTADO AQUÍ ---
-    const rastreador = consolidados.filter(r => r.Documento === 'CD2797');
-    if (rastreador.length > 0) {
-        console.log(`\n[REPO-DEBUG] 🟢 ¡CD2797 encontrado en SQL! Se encontraron ${rastreador.length} partidas de este documento.`);
-    } else {
-        console.log(`\n[REPO-DEBUG] 🔴 CD2797 NO SALIÓ DE LA BD. Verifica: ¿Es de este mes? ¿Su STATUS es 'C'? ¿Su CVE_CPTO en MINVE es diferente a 1?`);
-    }
-    // -------------------------------
-
-    return consolidados;
+    // Retornamos el 100% de los datos del mes
+    return [...res2, ...res3Mapeado];
 };
 
-module.exports = { obtenerComprasConsolidadas };
+module.exports = {
+    obtenerComprasConsolidadas
+};
