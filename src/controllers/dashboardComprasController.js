@@ -16,11 +16,12 @@ const parseQueryArray = (param) => {
  */
 const getAnalisisOrigenCompras = async (req, res) => {
     try {
+        const payload = Object.keys(req.body || {}).length > 0 ? req.body : req.query;
         const { 
             mes, anio, 
             almacenes, lineas, perfiles, generos, familias, 
             page, limit 
-        } = req.query;
+        } = payload;
 
         const now = new Date();
         const fMes = parseInt(mes) || (now.getMonth() + 1);
