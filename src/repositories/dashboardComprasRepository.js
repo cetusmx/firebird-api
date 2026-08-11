@@ -2,28 +2,30 @@ const db = require('../db');   // Empresa 2
 const db3 = require('../db3'); // Empresa 3
 
 /**
- * Extrae el "Universo Total" de compras consolidadas de un mes específico.
- * OPTIMIZADO: JOINs directos, Filtro estricto por Concepto = 1 y Fechas.
- * Nota: Los filtros dinámicos (familias, líneas) fueron removidos de SQL 
- * para ser procesados en la memoria RAM por el Controlador (Filtros Responsivos).
+ * Extrae el "Universo Total" de compras consolidadas de un rango de meses específico.
+ * OPTIMIZADO: JOINs directos, Filtro estricto por Concepto = 1 y Fechas por rango (BETWEEN).
  */
 const obtenerComprasConsolidadas = async (filtros) => {
-    const { mes, anio } = filtros;
+    // Recibimos los nuevos parámetros de rango
+    const { mes_inicio, anio_inicio, mes_fin, anio_fin } = filtros;
     
-    // Reglas inquebrantables de negocio: Solo facturas vivas y Solo Entradas por Compra
     let whereClauses = [
         "C.STATUS <> 'C'", 
         "M.CVE_CPTO = 1"
     ]; 
     let params = [];
 
-    // Filtros de fecha obligatorios para no saturar la RAM
-    if (mes && anio) {
-        const mesStr = String(mes).padStart(2, '0');
-        const ultimoDia = new Date(anio, mes, 0).getDate(); 
+    // Validamos que vengan los 4 parámetros del periodo
+    if (mes_inicio && anio_inicio && mes_fin && anio_fin) {
+        const mInicioStr = String(mes_inicio).padStart(2, '0');
+        const mFinStr = String(mes_fin).padStart(2, '0');
         
-        const fechaInicio = `${anio}-${mesStr}-01 00:00:00`;
-        const fechaFin = `${anio}-${mesStr}-${ultimoDia} 23:59:59`;
+        // Obtenemos el último día exacto del mes final
+        const ultimoDiaFin = new Date(anio_fin, mes_fin, 0).getDate(); 
+        
+        // Armamos los timestamps de los extremos del periodo
+        const fechaInicio = `${anio_inicio}-${mInicioStr}-01 00:00:00`;
+        const fechaFin = `${anio_fin}-${mFinStr}-${ultimoDiaFin} 23:59:59`;
 
         whereClauses.push("C.FECHA_DOC BETWEEN ? AND ?");
         params.push(fechaInicio, fechaFin);
@@ -57,7 +59,6 @@ const obtenerComprasConsolidadas = async (filtros) => {
         ${whereString}
     `;
 
-    // Función para inyectar el sufijo de empresa dinámicamente
     const buildSql = (sufijo) => {
         return sql
             .replace(/COMPC02/g, `COMPC${sufijo}`)
@@ -66,19 +67,16 @@ const obtenerComprasConsolidadas = async (filtros) => {
             .replace(/INVE_CLIB02/g, `INVE_CLIB${sufijo}`);
     };
 
-    // Lanzamos la consulta a ambas bases de datos simultáneamente
     const [res2, res3] = await Promise.all([
         db.query(buildSql('02'), params),
         db3.query(buildSql('03'), params)
     ]);
 
-    // Homologamos la Empresa 3 forzando el Almacén 3 (Fresnillo)
     const res3Mapeado = res3.map(row => ({
         ...row,
         Almacen: 3
     }));
 
-    // Retornamos el 100% de los datos del mes
     return [...res2, ...res3Mapeado];
 };
 

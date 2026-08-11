@@ -1,9 +1,7 @@
 const repo = require('../repositories/dashboardComprasRepository');
 
-// Función auxiliar de redondeo estándar a 2 decimales
 const round2 = (num) => Math.round((num + Number.EPSILON) * 100) / 100;
 
-// Función para parsear parámetros separados por comas a arreglos limpios
 const parseQueryArray = (param) => {
     if (!param) return null;
     const str = Array.isArray(param) ? param.join(',') : String(param);
@@ -11,21 +9,28 @@ const parseQueryArray = (param) => {
     return arr.length > 0 ? arr : null;
 };
 
-/**
- * Controlador para analizar el origen de las compras con Filtros Responsivos.
- */
 const getAnalisisOrigenCompras = async (req, res) => {
     try {
+        // Soporte universal: Permite recibir los datos tanto por POST (body) como por GET (query)
         const payload = Object.keys(req.body || {}).length > 0 ? req.body : req.query;
+
         const { 
-            mes, anio, 
+            mes, anio,                         // Parámetros versión anterior (compatibilidad)
+            mes_inicio, anio_inicio,           // Nuevos parámetros de rango
+            mes_fin, anio_fin,                 
             almacenes, lineas, perfiles, generos, familias, 
             page, limit 
         } = payload;
 
         const now = new Date();
-        const fMes = parseInt(mes) || (now.getMonth() + 1);
-        const fAnio = parseInt(anio) || now.getFullYear();
+        
+        // LÓGICA DE FALLBACK: 
+        // Si manda 'mes_inicio', lo usa. Si manda 'mes' antiguo, lo usa. Si no manda nada, usa mes actual.
+        const mInicio = parseInt(mes_inicio) || parseInt(mes) || (now.getMonth() + 1);
+        const aInicio = parseInt(anio_inicio) || parseInt(anio) || now.getFullYear();
+        
+        const mFin = parseInt(mes_fin) || parseInt(mes) || (now.getMonth() + 1);
+        const aFin = parseInt(anio_fin) || parseInt(anio) || now.getFullYear();
         
         const pPage = parseInt(page) || 1;
         const pLimit = parseInt(limit) || 50;
@@ -37,7 +42,13 @@ const getAnalisisOrigenCompras = async (req, res) => {
         const targetGeneros = parseQueryArray(generos);
         const targetFamilias = parseQueryArray(familias);
 
-        const comprasUniverso = await repo.obtenerComprasConsolidadas({ mes: fMes, anio: fAnio });
+        // Mandamos el rango de tiempo validado al repositorio
+        const comprasUniverso = await repo.obtenerComprasConsolidadas({ 
+            mes_inicio: mInicio, 
+            anio_inicio: aInicio, 
+            mes_fin: mFin, 
+            anio_fin: aFin 
+        });
 
         const setAlmacenes = new Set();
         const setLineas = new Set();
@@ -86,12 +97,9 @@ const getAnalisisOrigenCompras = async (req, res) => {
                 const costo = parseFloat(row.Costo) || 0;
                 const montoPartida = cantidad * costo;
 
-                // --- CORRECCIÓN APLICADA AQUÍ ---
-                // Reemplazamos los totales de la factura por los totales del producto específico
                 row.Subtotal = round2(montoPartida);
                 row['Importe Total'] = round2(montoPartida * 1.16); 
                 
-                // Normalización para evitar fallos por valores vacíos en el frontend
                 row.Almacen = valAlmacen;
                 row.Línea = valLinea;
                 row.Perfil = valPerfil;
@@ -124,7 +132,11 @@ const getAnalisisOrigenCompras = async (req, res) => {
         const datosPaginados = datosFiltrados.slice(offset, offset + pLimit);
 
         res.json({
-            periodo: { mes: fMes, anio: fAnio },
+            // El periodo de respuesta refleja el rango consultado
+            periodo: { 
+                inicio: { mes: mInicio, anio: aInicio },
+                fin: { mes: mFin, anio: aFin }
+            },
             filtros_aplicados: { 
                 almacenes: targetAlmacenes, 
                 lineas: targetLineas, 
