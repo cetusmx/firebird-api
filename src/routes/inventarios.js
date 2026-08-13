@@ -128,7 +128,7 @@ router.get('/productos', async (req, res) => {
             totalRecords = countRes[0].TOTAL;
         }
 
-        console.log("Productos devueltos: ", productos);
+        //console.log("Productos devueltos: ", productos);
 
         res.json(isDownload ? productos : { 
             total: totalRecords, 

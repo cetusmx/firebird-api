@@ -907,7 +907,7 @@ app.get('/clavesalternas/search3', async (req, res) => {
     LEFT JOIN MULT02 T6 ON I.CVE_ART = T6.CVE_ART
     WHERE I.STATUS = 'A' 
       AND (
-        UPPER(I.CVE_ART) LIKE ?
+        UPPER(I.CVE_ART) LIKE CAST(? AS VARCHAR(100))
       )
     GROUP BY 1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20
       ORDER BY I.CVE_ART;
