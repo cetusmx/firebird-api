@@ -143,5 +143,57 @@ router.get('/productos', async (req, res) => {
     }
 });
 
+router.post('/productos/consulta', async (req, res) => {
+    try {
+        const { claves } = req.body;
+
+        // 1. Validar el input
+        if (!Array.isArray(claves) || claves.length === 0) {
+            return res.status(400).json({ 
+                error: 'El formato esperado es { "claves": ["clave1", "clave2"] } con al menos un elemento.' 
+            });
+        }
+
+        // 2. Limpiar las claves recibidas (eliminar espacios y nulos)
+        const clavesLimpias = claves
+            .filter(c => typeof c === 'string' && c.trim() !== '')
+            .map(c => c.trim());
+        
+        if (clavesLimpias.length === 0) {
+            return res.status(400).json({ error: 'El arreglo "claves" no contiene datos válidos.' });
+        }
+
+        // 3. Procesar en lotes (chunks) para prevenir límites de Firebird en cláusulas IN (máx ~1500 params)
+        const chunkSize = 1000;
+        const productosEncontrados = [];
+
+        for (let i = 0; i < clavesLimpias.length; i += chunkSize) {
+            const chunk = clavesLimpias.slice(i, i + chunkSize);
+            const placeholders = chunk.map(() => '?').join(',');
+
+            // Consulta solicitando únicamente los datos necesarios y alias exactos (entre comillas dobles para respetar minúsculas)
+            const sql = `
+                SELECT 
+                    TRIM(CVE_ART) AS "clave", 
+                    TRIM(DESCR) AS "descripcion", 
+                    TRIM(LIN_PROD) AS "linea", 
+                    TRIM(UNI_MED) AS "unidad"
+                FROM INVE02 
+                WHERE STATUS = 'A' AND TRIM(CVE_ART) IN (${placeholders})
+            `;
+
+            const chunkRes = await db.query(sql, chunk);
+            productosEncontrados.push(...chunkRes);
+        }
+
+        // 4. Devolver la respuesta en el formato exacto esperado
+        res.json({ productos: productosEncontrados });
+
+    } catch (error) {
+        console.error("Error en endpoint POST /productos/consulta:", error.message);
+        res.status(500).json({ error: "Error interno al procesar la solicitud.", detalle: error.message });
+    }
+});
+
 module.exports = router;
 
