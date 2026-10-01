@@ -118,8 +118,9 @@ const obtenerVentasClientes = async (almacen, cliente) => {
     sql += ` WHERE C.STATUS = 'A'`;
 
     if (cliente) {
-        sql += ` AND (UPPER(TRIM(C.CLAVE)) CONTAINING UPPER(?) OR UPPER(TRIM(C.NOMBRE)) CONTAINING UPPER(?))`;
-        params.push(cliente, cliente);
+        // Ahora busca estrictamente coincidencias en la CLAVE del cliente
+        sql += ` AND UPPER(TRIM(C.CLAVE)) CONTAINING UPPER(?)`;
+        params.push(cliente);
     }
 
     // Agrupación de todos los campos de cliente
