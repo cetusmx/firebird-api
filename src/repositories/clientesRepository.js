@@ -102,6 +102,7 @@ const obtenerVentasClientes = async (almacen, cliente) => {
             C.SALDO,
             C.LISTA_PREC,
             C.FCH_ULTCOM AS FECHA_ULT_COMPRA_GENERAL,
+            F.NUM_ALMA,
             MAX(F.FECHA_DOC) AS FECHA_ULTIMA_COMPRA
         FROM ${tablaClie} C
     `;
@@ -128,7 +129,7 @@ const obtenerVentasClientes = async (almacen, cliente) => {
         GROUP BY 
             C.CLAVE, C.NOMBRE, C.RFC, C.CALLE, C.NUMEXT, C.NUMINT,
             C.COLONIA, C.CODIGO, C.LOCALIDAD, C.MUNICIPIO, C.ESTADO,
-            C.TELEFONO, C.PAG_WEB, C.EMAILPRED, C.SALDO, C.LISTA_PREC, C.FCH_ULTCOM
+            C.TELEFONO, C.PAG_WEB, C.EMAILPRED, C.SALDO, C.LISTA_PREC, C.FCH_ULTCOM, F.NUM_ALMA
     `;
 
     // Ordenamiento: nulls al principio (clientes que nunca compran), luego las fechas más antiguas
