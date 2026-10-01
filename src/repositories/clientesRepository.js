@@ -74,8 +74,33 @@ const buscarClientePorRFC = async (rfc, sucursal) => {
     return resultados;
 };
 
-const obtenerVentasClientes = async (almacen, cliente) => {
-    // Si queremos buscar en db3 cuando almacen es 3, podríamos hacerlo.
+const obtenerAniosVentas = async (almacen) => {
+    const isAlmacen3 = almacen && String(almacen) === '3';
+    const database = isAlmacen3 ? db3 : db;
+    const tablaFact = isAlmacen3 ? 'FACTF03' : 'FACTF02';
+    
+    // Obtenemos todos los años únicos presentes en la tabla de facturas
+    let sql = `SELECT DISTINCT EXTRACT(YEAR FROM FECHA_DOC) AS ANIO FROM ${tablaFact} WHERE STATUS <> 'C'`;
+    const params = [];
+    
+    if (almacen) {
+        sql += ` AND NUM_ALMA = ?`;
+        params.push(almacen);
+    }
+    
+    sql += ` ORDER BY 1 DESC`;
+    
+    try {
+        const res = await database.query(sql, params);
+        // Retornamos un arreglo plano solo con los números [2024, 2023, ...] y filtramos los nulos
+        return res.map(r => r.ANIO).filter(a => a !== null);
+    } catch (error) {
+        console.error("Error al obtener años de ventas:", error);
+        return [];
+    }
+};
+
+const obtenerVentasClientes = async (almacen, cliente, anio) => {
     // Por el requerimiento base de CLIE02 y FACTF02, lo haremos sobre db (02).
     const isAlmacen3 = almacen && String(almacen) === '3';
     const database = isAlmacen3 ? db3 : db;
@@ -83,9 +108,17 @@ const obtenerVentasClientes = async (almacen, cliente) => {
     const tablaFact = isAlmacen3 ? 'FACTF03' : 'FACTF02';
 
     const params = [];
+    
+    // Subconsulta para filtrar por almacén
+    let filtroFacturas = '';
+    if (almacen) {
+        filtroFacturas = ` AND F.NUM_ALMA = ? `;
+        // Pasamos el parámetro 2 veces (uno para el SELECT del NUM_ALMA y otro para el SELECT de la FECHA_DOC)
+        params.push(almacen, almacen);
+    }
 
-    // Base del SQL
-    let sql = `
+    // Consulta interna
+    let innerSql = `
         SELECT 
             TRIM(C.CLAVE) AS CLAVE,
             TRIM(C.NOMBRE) AS NOMBRE,
@@ -102,38 +135,31 @@ const obtenerVentasClientes = async (almacen, cliente) => {
             C.SALDO,
             C.LISTA_PREC,
             C.FCH_ULTCOM AS FECHA_ULT_COMPRA_GENERAL,
-            F.NUM_ALMA,
-            MAX(F.FECHA_DOC) AS FECHA_ULTIMA_COMPRA
+            (SELECT FIRST 1 F.NUM_ALMA FROM ${tablaFact} F WHERE F.CVE_CLPV = C.CLAVE AND F.STATUS <> 'C' ${filtroFacturas} ORDER BY F.FECHA_DOC DESC) AS NUM_ALMA,
+            (SELECT FIRST 1 F.FECHA_DOC FROM ${tablaFact} F WHERE F.CVE_CLPV = C.CLAVE AND F.STATUS <> 'C' ${filtroFacturas} ORDER BY F.FECHA_DOC DESC) AS FECHA_ULTIMA_COMPRA
         FROM ${tablaClie} C
+        WHERE C.STATUS = 'A'
     `;
 
-    // LEFT JOIN para permitir traer clientes aunque no tengan compras
-    if (almacen) {
-        sql += ` LEFT JOIN ${tablaFact} F ON C.CLAVE = F.CVE_CLPV AND F.NUM_ALMA = ? AND F.STATUS <> 'C'`;
-        params.push(almacen);
-    } else {
-        sql += ` LEFT JOIN ${tablaFact} F ON C.CLAVE = F.CVE_CLPV AND F.STATUS <> 'C'`;
-    }
-
-    // Filtros de tabla clientes
-    sql += ` WHERE C.STATUS = 'A'`;
-
     if (cliente) {
-        // Ahora busca estrictamente coincidencias en la CLAVE del cliente
-        sql += ` AND UPPER(TRIM(C.CLAVE)) CONTAINING UPPER(?)`;
+        innerSql += ` AND UPPER(TRIM(C.CLAVE)) CONTAINING UPPER(?)`;
         params.push(cliente);
     }
 
-    // Agrupación de todos los campos de cliente
-    sql += `
-        GROUP BY 
-            C.CLAVE, C.NOMBRE, C.RFC, C.CALLE, C.NUMEXT, C.NUMINT,
-            C.COLONIA, C.CODIGO, C.LOCALIDAD, C.MUNICIPIO, C.ESTADO,
-            C.TELEFONO, C.PAG_WEB, C.EMAILPRED, C.SALDO, C.LISTA_PREC, C.FCH_ULTCOM, F.NUM_ALMA
-    `;
+    // Envolvemos en una consulta principal para poder filtrar directamente por el alias calculado (FECHA_ULTIMA_COMPRA)
+    let sql = `SELECT * FROM (${innerSql}) T`;
 
-    // Ordenamiento: nulls al principio (clientes que nunca compran), luego las fechas más antiguas
-    sql += ` ORDER BY MAX(F.FECHA_DOC) ASC NULLS FIRST`;
+    if (anio) {
+        if (anio === 'null' || anio === 'sin_compras') {
+            sql += ` WHERE T.FECHA_ULTIMA_COMPRA IS NULL`;
+        } else {
+            sql += ` WHERE EXTRACT(YEAR FROM T.FECHA_ULTIMA_COMPRA) = ?`;
+            params.push(anio);
+        }
+    }
+
+    // Ordenamos por la FECHA_ULTIMA_COMPRA (Nulls al principio, luego fechas antiguas)
+    sql += ` ORDER BY T.FECHA_ULTIMA_COMPRA ASC NULLS FIRST`;
 
     const resultados = await database.query(sql, params);
     return resultados;
@@ -141,5 +167,6 @@ const obtenerVentasClientes = async (almacen, cliente) => {
 
 module.exports = {
     buscarClientePorRFC,
-    obtenerVentasClientes
+    obtenerVentasClientes,
+    obtenerAniosVentas
 };

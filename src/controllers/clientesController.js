@@ -47,14 +47,18 @@ const getClienteByRFC = async (req, res) => {
  */
 const obtenerVentas = async (req, res) => {
     try {
-        const { almacen, cliente } = req.query;
+        const { almacen, cliente, anio } = req.query;
 
-        // Llamada al repositorio
-        const ventas = await repo.obtenerVentasClientes(almacen, cliente);
+        // Llamadas paralelas al repositorio
+        const [ventas, aniosDisponibles] = await Promise.all([
+            repo.obtenerVentasClientes(almacen, cliente, anio),
+            repo.obtenerAniosVentas(almacen)
+        ]);
 
         // Respuesta estructurada
         res.json({
             total_clientes: ventas.length,
+            anios_disponibles: aniosDisponibles,
             data: ventas
         });
 
