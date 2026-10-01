@@ -113,8 +113,8 @@ const obtenerVentasClientes = async (almacen, cliente, anio) => {
     let filtroFacturas = '';
     if (almacen) {
         filtroFacturas = ` AND F.NUM_ALMA = ? `;
-        // Pasamos el parámetro 2 veces (uno para el SELECT del NUM_ALMA y otro para el SELECT de la FECHA_DOC)
-        params.push(almacen, almacen);
+        // Pasamos el parámetro 3 veces (NUM_ALMA, FECHA_DOC, CANT_TOT)
+        params.push(almacen, almacen, almacen);
     }
 
     // Consulta interna
@@ -136,7 +136,8 @@ const obtenerVentasClientes = async (almacen, cliente, anio) => {
             C.LISTA_PREC,
             C.FCH_ULTCOM AS FECHA_ULT_COMPRA_GENERAL,
             (SELECT FIRST 1 F.NUM_ALMA FROM ${tablaFact} F WHERE F.CVE_CLPV = C.CLAVE AND F.STATUS <> 'C' ${filtroFacturas} ORDER BY F.FECHA_DOC DESC) AS NUM_ALMA,
-            (SELECT FIRST 1 F.FECHA_DOC FROM ${tablaFact} F WHERE F.CVE_CLPV = C.CLAVE AND F.STATUS <> 'C' ${filtroFacturas} ORDER BY F.FECHA_DOC DESC) AS FECHA_ULTIMA_COMPRA
+            (SELECT FIRST 1 F.FECHA_DOC FROM ${tablaFact} F WHERE F.CVE_CLPV = C.CLAVE AND F.STATUS <> 'C' ${filtroFacturas} ORDER BY F.FECHA_DOC DESC) AS FECHA_ULTIMA_COMPRA,
+            (SELECT FIRST 1 F.CANT_TOT FROM ${tablaFact} F WHERE F.CVE_CLPV = C.CLAVE AND F.STATUS <> 'C' ${filtroFacturas} ORDER BY F.FECHA_DOC DESC) AS CANT_TOT
         FROM ${tablaClie} C
         WHERE C.STATUS = 'A'
     `;
