@@ -74,6 +74,70 @@ const buscarClientePorRFC = async (rfc, sucursal) => {
     return resultados;
 };
 
+const obtenerVentasClientes = async (almacen, cliente) => {
+    // Si queremos buscar en db3 cuando almacen es 3, podríamos hacerlo.
+    // Por el requerimiento base de CLIE02 y FACTF02, lo haremos sobre db (02).
+    const isAlmacen3 = almacen && String(almacen) === '3';
+    const database = isAlmacen3 ? db3 : db;
+    const tablaClie = isAlmacen3 ? 'CLIE03' : 'CLIE02';
+    const tablaFact = isAlmacen3 ? 'FACTF03' : 'FACTF02';
+
+    const params = [];
+
+    // Base del SQL
+    let sql = `
+        SELECT 
+            TRIM(C.CLAVE) AS CLAVE,
+            TRIM(C.NOMBRE) AS NOMBRE,
+            TRIM(C.RFC) AS RFC,
+            TRIM(COALESCE(C.CALLE, '')) || ' ' || TRIM(COALESCE(C.NUMEXT, '')) || ' ' || TRIM(COALESCE(C.NUMINT, '')) AS DIRECCION,
+            TRIM(C.COLONIA) AS COLONIA,
+            TRIM(C.CODIGO) AS CODIGO,
+            TRIM(C.LOCALIDAD) AS LOCALIDAD,
+            TRIM(C.MUNICIPIO) AS MUNICIPIO,
+            TRIM(C.ESTADO) AS ESTADO,
+            TRIM(C.TELEFONO) AS TELEFONO,
+            TRIM(C.PAG_WEB) AS PAG_WEB,
+            TRIM(C.EMAILPRED) AS EMAILPRED,
+            C.SALDO,
+            C.LISTA_PREC,
+            C.FCH_ULTCOM AS FECHA_ULT_COMPRA_GENERAL,
+            MAX(F.FECHA_DOC) AS FECHA_ULTIMA_COMPRA
+        FROM ${tablaClie} C
+    `;
+
+    // LEFT JOIN para permitir traer clientes aunque no tengan compras
+    if (almacen) {
+        sql += ` LEFT JOIN ${tablaFact} F ON C.CLAVE = F.CVE_CLPV AND F.NUM_ALMA = ? AND F.STATUS <> 'C'`;
+        params.push(almacen);
+    } else {
+        sql += ` LEFT JOIN ${tablaFact} F ON C.CLAVE = F.CVE_CLPV AND F.STATUS <> 'C'`;
+    }
+
+    // Filtros de tabla clientes
+    sql += ` WHERE C.STATUS = 'A'`;
+
+    if (cliente) {
+        sql += ` AND (UPPER(TRIM(C.CLAVE)) CONTAINING UPPER(?) OR UPPER(TRIM(C.NOMBRE)) CONTAINING UPPER(?))`;
+        params.push(cliente, cliente);
+    }
+
+    // Agrupación de todos los campos de cliente
+    sql += `
+        GROUP BY 
+            C.CLAVE, C.NOMBRE, C.RFC, C.CALLE, C.NUMEXT, C.NUMINT,
+            C.COLONIA, C.CODIGO, C.LOCALIDAD, C.MUNICIPIO, C.ESTADO,
+            C.TELEFONO, C.PAG_WEB, C.EMAILPRED, C.SALDO, C.LISTA_PREC, C.FCH_ULTCOM
+    `;
+
+    // Ordenamiento: nulls al principio (clientes que nunca compran), luego las fechas más antiguas
+    sql += ` ORDER BY MAX(F.FECHA_DOC) ASC NULLS FIRST`;
+
+    const resultados = await database.query(sql, params);
+    return resultados;
+};
+
 module.exports = {
-    buscarClientePorRFC
+    buscarClientePorRFC,
+    obtenerVentasClientes
 };

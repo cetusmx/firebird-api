@@ -42,6 +42,32 @@ const getClienteByRFC = async (req, res) => {
     }
 };
 
+/**
+ * Obtiene el registro de compras por cliente
+ */
+const obtenerVentas = async (req, res) => {
+    try {
+        const { almacen, cliente } = req.query;
+
+        // Llamada al repositorio
+        const ventas = await repo.obtenerVentasClientes(almacen, cliente);
+
+        // Respuesta estructurada
+        res.json({
+            total_clientes: ventas.length,
+            data: ventas
+        });
+
+    } catch (error) {
+        console.error("Error en obtenerVentas (Controller):", error.message);
+        res.status(500).json({ 
+            error: "Error interno del servidor", 
+            detalle: error.message 
+        });
+    }
+};
+
 module.exports = {
-    getClienteByRFC
+    getClienteByRFC,
+    obtenerVentas
 };
