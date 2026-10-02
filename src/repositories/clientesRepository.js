@@ -75,10 +75,13 @@ const buscarClientePorRFC = async (rfc, sucursal) => {
 };
 
 const obtenerAniosVentas = async (almacen) => {
+    const isGlobal = !almacen || almacen === '0' || almacen === 'null' || almacen === 'undefined' || almacen === 'todos';
+    const isAlmacen3 = !isGlobal && String(almacen) === '3';
+
     const buildAniosQuery = (tablaFact) => {
         let sql = `SELECT DISTINCT EXTRACT(YEAR FROM FECHA_DOC) AS ANIO FROM ${tablaFact} WHERE STATUS <> 'C'`;
         const params = [];
-        if (almacen) {
+        if (!isGlobal) {
             sql += ` AND NUM_ALMA = ?`;
             params.push(almacen);
         }
@@ -86,11 +89,11 @@ const obtenerAniosVentas = async (almacen) => {
     };
 
     try {
-        if (almacen && String(almacen) === '3') {
+        if (isAlmacen3) {
             const q = buildAniosQuery('FACTF03');
             const res = await db3.query(q.sql, q.params);
             return res.map(r => r.ANIO).filter(a => a !== null).sort((a, b) => b - a);
-        } else if (almacen) {
+        } else if (!isGlobal) {
             const q = buildAniosQuery('FACTF02');
             const res = await db.query(q.sql, q.params);
             return res.map(r => r.ANIO).filter(a => a !== null).sort((a, b) => b - a);
@@ -114,12 +117,17 @@ const obtenerAniosVentas = async (almacen) => {
 };
 
 const obtenerVentasClientes = async (almacen, cliente, anio) => {
+    // Sanitizamos la bandera global para evitar errores si el frontend manda "null" o "undefined" como string
+    const isGlobal = !almacen || almacen === '0' || almacen === 'null' || almacen === 'undefined' || almacen === 'todos';
+    const isAlmacen3 = !isGlobal && String(almacen) === '3';
+
     // Función creadora dinámica de SQL según la tabla a apuntar
     const buildVentasQuery = (tablaClie, tablaFact) => {
         const params = [];
         let filtroFacturas = '';
-        if (almacen) {
+        if (!isGlobal) {
             filtroFacturas = ` AND F.NUM_ALMA = ? `;
+            // Pasamos el parámetro 3 veces (NUM_ALMA, FECHA_DOC, CAN_TOT)
             params.push(almacen, almacen, almacen);
         }
 
@@ -153,24 +161,31 @@ const obtenerVentasClientes = async (almacen, cliente, anio) => {
         }
 
         let sql = `SELECT * FROM (${innerSql}) T`;
+        let whereClauses = [];
 
-        if (anio) {
-            if (anio === 'null' || anio === 'sin_compras') {
-                sql += ` WHERE T.FECHA_ULTIMA_COMPRA IS NULL`;
-            } else {
-                sql += ` WHERE EXTRACT(YEAR FROM T.FECHA_ULTIMA_COMPRA) = ?`;
-                params.push(anio);
-            }
+        if (anio && anio !== 'null' && anio !== 'sin_compras' && anio !== 'undefined') {
+            whereClauses.push(`EXTRACT(YEAR FROM T.FECHA_ULTIMA_COMPRA) = ?`);
+            params.push(anio);
+        } else if (anio === 'null' || anio === 'sin_compras') {
+            whereClauses.push(`T.FECHA_ULTIMA_COMPRA IS NULL`);
+        } else if (!isGlobal) {
+            // Si buscamos en un almacén específico y NO pedimos inactivos, 
+            // ocultamos la basura o clientes temporales que nunca le han comprado a este almacén
+            whereClauses.push(`T.FECHA_ULTIMA_COMPRA IS NOT NULL`);
+        }
+
+        if (whereClauses.length > 0) {
+            sql += ` WHERE ` + whereClauses.join(' AND ');
         }
 
         return { sql, params };
     };
 
-    if (almacen && String(almacen) === '3') {
+    if (isAlmacen3) {
         const q = buildVentasQuery('CLIE03', 'FACTF03');
         q.sql += ` ORDER BY T.FECHA_ULTIMA_COMPRA ASC NULLS FIRST`;
         return await db3.query(q.sql, q.params);
-    } else if (almacen) {
+    } else if (!isGlobal) {
         const q = buildVentasQuery('CLIE02', 'FACTF02');
         q.sql += ` ORDER BY T.FECHA_ULTIMA_COMPRA ASC NULLS FIRST`;
         return await db.query(q.sql, q.params);
