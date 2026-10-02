@@ -267,6 +267,11 @@ const obtenerVentasClientes = async (almacen, cliente, anio) => {
         return dateA - dateB;
     });
 
+    // Sincronizamos el campo FECHA_ULT_COMPRA_GENERAL para que muestre el dato real calculado
+    arrayFinal.forEach(c => {
+        c.FECHA_ULT_COMPRA_GENERAL = c.FECHA_ULTIMA_COMPRA;
+    });
+
     return arrayFinal;
 };
 
