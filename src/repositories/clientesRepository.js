@@ -156,7 +156,7 @@ const obtenerVentasClientes = async (almacen, cliente, anio) => {
         `;
 
         if (cliente) {
-            innerSql += ` AND UPPER(TRIM(C.CLAVE)) CONTAINING UPPER(?)`;
+            innerSql += ` AND UPPER(TRIM(C.CLAVE)) = UPPER(TRIM(?))`;
             params.push(cliente);
         }
 
