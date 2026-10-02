@@ -75,25 +75,38 @@ const buscarClientePorRFC = async (rfc, sucursal) => {
 };
 
 const obtenerAniosVentas = async (almacen) => {
-    const isAlmacen3 = almacen && String(almacen) === '3';
-    const database = isAlmacen3 ? db3 : db;
-    const tablaFact = isAlmacen3 ? 'FACTF03' : 'FACTF02';
-    
-    // Obtenemos todos los años únicos presentes en la tabla de facturas
-    let sql = `SELECT DISTINCT EXTRACT(YEAR FROM FECHA_DOC) AS ANIO FROM ${tablaFact} WHERE STATUS <> 'C'`;
-    const params = [];
-    
-    if (almacen) {
-        sql += ` AND NUM_ALMA = ?`;
-        params.push(almacen);
-    }
-    
-    sql += ` ORDER BY 1 DESC`;
-    
+    const buildAniosQuery = (tablaFact) => {
+        let sql = `SELECT DISTINCT EXTRACT(YEAR FROM FECHA_DOC) AS ANIO FROM ${tablaFact} WHERE STATUS <> 'C'`;
+        const params = [];
+        if (almacen) {
+            sql += ` AND NUM_ALMA = ?`;
+            params.push(almacen);
+        }
+        return { sql, params };
+    };
+
     try {
-        const res = await database.query(sql, params);
-        // Retornamos un arreglo plano solo con los números [2024, 2023, ...] y filtramos los nulos
-        return res.map(r => r.ANIO).filter(a => a !== null);
+        if (almacen && String(almacen) === '3') {
+            const q = buildAniosQuery('FACTF03');
+            const res = await db3.query(q.sql, q.params);
+            return res.map(r => r.ANIO).filter(a => a !== null).sort((a, b) => b - a);
+        } else if (almacen) {
+            const q = buildAniosQuery('FACTF02');
+            const res = await db.query(q.sql, q.params);
+            return res.map(r => r.ANIO).filter(a => a !== null).sort((a, b) => b - a);
+        } else {
+            // Búsqueda global: Consultamos a ambas bases de datos al mismo tiempo
+            const q2 = buildAniosQuery('FACTF02');
+            const q3 = buildAniosQuery('FACTF03');
+            const [res2, res3] = await Promise.all([
+                db.query(q2.sql, q2.params),
+                db3.query(q3.sql, q3.params)
+            ]);
+            
+            // Unimos resultados eliminando duplicados
+            const setAnios = new Set([...res2.map(r => r.ANIO), ...res3.map(r => r.ANIO)]);
+            return Array.from(setAnios).filter(a => a !== null).sort((a, b) => b - a);
+        }
     } catch (error) {
         console.error("Error al obtener años de ventas:", error);
         return [];
@@ -101,69 +114,118 @@ const obtenerAniosVentas = async (almacen) => {
 };
 
 const obtenerVentasClientes = async (almacen, cliente, anio) => {
-    // Por el requerimiento base de CLIE02 y FACTF02, lo haremos sobre db (02).
-    const isAlmacen3 = almacen && String(almacen) === '3';
-    const database = isAlmacen3 ? db3 : db;
-    const tablaClie = isAlmacen3 ? 'CLIE03' : 'CLIE02';
-    const tablaFact = isAlmacen3 ? 'FACTF03' : 'FACTF02';
-
-    const params = [];
-    
-    // Subconsulta para filtrar por almacén
-    let filtroFacturas = '';
-    if (almacen) {
-        filtroFacturas = ` AND F.NUM_ALMA = ? `;
-        // Pasamos el parámetro 3 veces (NUM_ALMA, FECHA_DOC, CANT_TOT)
-        params.push(almacen, almacen, almacen);
-    }
-
-    // Consulta interna
-    let innerSql = `
-        SELECT 
-            TRIM(C.CLAVE) AS CLAVE,
-            TRIM(C.NOMBRE) AS NOMBRE,
-            TRIM(C.RFC) AS RFC,
-            TRIM(COALESCE(C.CALLE, '')) || ' ' || TRIM(COALESCE(C.NUMEXT, '')) || ' ' || TRIM(COALESCE(C.NUMINT, '')) AS DIRECCION,
-            TRIM(C.COLONIA) AS COLONIA,
-            TRIM(C.CODIGO) AS CODIGO,
-            TRIM(C.LOCALIDAD) AS LOCALIDAD,
-            TRIM(C.MUNICIPIO) AS MUNICIPIO,
-            TRIM(C.ESTADO) AS ESTADO,
-            TRIM(C.TELEFONO) AS TELEFONO,
-            TRIM(C.PAG_WEB) AS PAG_WEB,
-            TRIM(C.EMAILPRED) AS EMAILPRED,
-            C.SALDO,
-            C.LISTA_PREC,
-            C.FCH_ULTCOM AS FECHA_ULT_COMPRA_GENERAL,
-            (SELECT FIRST 1 F.NUM_ALMA FROM ${tablaFact} F WHERE F.CVE_CLPV = C.CLAVE AND F.STATUS <> 'C' ${filtroFacturas} ORDER BY F.FECHA_DOC DESC) AS NUM_ALMA,
-            (SELECT FIRST 1 F.FECHA_DOC FROM ${tablaFact} F WHERE F.CVE_CLPV = C.CLAVE AND F.STATUS <> 'C' ${filtroFacturas} ORDER BY F.FECHA_DOC DESC) AS FECHA_ULTIMA_COMPRA,
-            (SELECT FIRST 1 F.CAN_TOT FROM ${tablaFact} F WHERE F.CVE_CLPV = C.CLAVE AND F.STATUS <> 'C' ${filtroFacturas} ORDER BY F.FECHA_DOC DESC) AS CANT_TOT
-        FROM ${tablaClie} C
-        WHERE C.STATUS = 'A'
-    `;
-
-    if (cliente) {
-        innerSql += ` AND UPPER(TRIM(C.CLAVE)) CONTAINING UPPER(?)`;
-        params.push(cliente);
-    }
-
-    // Envolvemos en una consulta principal para poder filtrar directamente por el alias calculado (FECHA_ULTIMA_COMPRA)
-    let sql = `SELECT * FROM (${innerSql}) T`;
-
-    if (anio) {
-        if (anio === 'null' || anio === 'sin_compras') {
-            sql += ` WHERE T.FECHA_ULTIMA_COMPRA IS NULL`;
-        } else {
-            sql += ` WHERE EXTRACT(YEAR FROM T.FECHA_ULTIMA_COMPRA) = ?`;
-            params.push(anio);
+    // Función creadora dinámica de SQL según la tabla a apuntar
+    const buildVentasQuery = (tablaClie, tablaFact) => {
+        const params = [];
+        let filtroFacturas = '';
+        if (almacen) {
+            filtroFacturas = ` AND F.NUM_ALMA = ? `;
+            params.push(almacen, almacen, almacen);
         }
+
+        let innerSql = `
+            SELECT 
+                TRIM(C.CLAVE) AS CLAVE,
+                TRIM(C.NOMBRE) AS NOMBRE,
+                TRIM(C.RFC) AS RFC,
+                TRIM(COALESCE(C.CALLE, '')) || ' ' || TRIM(COALESCE(C.NUMEXT, '')) || ' ' || TRIM(COALESCE(C.NUMINT, '')) AS DIRECCION,
+                TRIM(C.COLONIA) AS COLONIA,
+                TRIM(C.CODIGO) AS CODIGO,
+                TRIM(C.LOCALIDAD) AS LOCALIDAD,
+                TRIM(C.MUNICIPIO) AS MUNICIPIO,
+                TRIM(C.ESTADO) AS ESTADO,
+                TRIM(C.TELEFONO) AS TELEFONO,
+                TRIM(C.PAG_WEB) AS PAG_WEB,
+                TRIM(C.EMAILPRED) AS EMAILPRED,
+                C.SALDO,
+                C.LISTA_PREC,
+                C.FCH_ULTCOM AS FECHA_ULT_COMPRA_GENERAL,
+                (SELECT FIRST 1 F.NUM_ALMA FROM ${tablaFact} F WHERE F.CVE_CLPV = C.CLAVE AND F.STATUS <> 'C' ${filtroFacturas} ORDER BY F.FECHA_DOC DESC) AS NUM_ALMA,
+                (SELECT FIRST 1 F.FECHA_DOC FROM ${tablaFact} F WHERE F.CVE_CLPV = C.CLAVE AND F.STATUS <> 'C' ${filtroFacturas} ORDER BY F.FECHA_DOC DESC) AS FECHA_ULTIMA_COMPRA,
+                (SELECT FIRST 1 F.CAN_TOT FROM ${tablaFact} F WHERE F.CVE_CLPV = C.CLAVE AND F.STATUS <> 'C' ${filtroFacturas} ORDER BY F.FECHA_DOC DESC) AS CANT_TOT
+            FROM ${tablaClie} C
+            WHERE C.STATUS = 'A'
+        `;
+
+        if (cliente) {
+            innerSql += ` AND UPPER(TRIM(C.CLAVE)) CONTAINING UPPER(?)`;
+            params.push(cliente);
+        }
+
+        let sql = `SELECT * FROM (${innerSql}) T`;
+
+        if (anio) {
+            if (anio === 'null' || anio === 'sin_compras') {
+                sql += ` WHERE T.FECHA_ULTIMA_COMPRA IS NULL`;
+            } else {
+                sql += ` WHERE EXTRACT(YEAR FROM T.FECHA_ULTIMA_COMPRA) = ?`;
+                params.push(anio);
+            }
+        }
+
+        return { sql, params };
+    };
+
+    if (almacen && String(almacen) === '3') {
+        const q = buildVentasQuery('CLIE03', 'FACTF03');
+        q.sql += ` ORDER BY T.FECHA_ULTIMA_COMPRA ASC NULLS FIRST`;
+        return await db3.query(q.sql, q.params);
+    } else if (almacen) {
+        const q = buildVentasQuery('CLIE02', 'FACTF02');
+        q.sql += ` ORDER BY T.FECHA_ULTIMA_COMPRA ASC NULLS FIRST`;
+        return await db.query(q.sql, q.params);
+    } else {
+        // BÚSQUEDA GLOBAL: Consultar a DB (1,5,6,7) y DB3 (3) en paralelo
+        const q2 = buildVentasQuery('CLIE02', 'FACTF02');
+        const q3 = buildVentasQuery('CLIE03', 'FACTF03');
+        
+        const [res2, res3] = await Promise.all([
+            db.query(q2.sql, q2.params),
+            db3.query(q3.sql, q3.params)
+        ]);
+
+        const clientesMap = new Map();
+
+        const procesar = (c) => {
+            const clave = c.CLAVE;
+            if (!clientesMap.has(clave)) {
+                clientesMap.set(clave, c);
+            } else {
+                const existente = clientesMap.get(clave);
+                const d1 = c.FECHA_ULTIMA_COMPRA ? new Date(c.FECHA_ULTIMA_COMPRA).getTime() : 0;
+                const d2 = existente.FECHA_ULTIMA_COMPRA ? new Date(existente.FECHA_ULTIMA_COMPRA).getTime() : 0;
+                
+                // Si la fecha recién evaluada es más nueva que la que ya teníamos registrada
+                if (d1 > d2) {
+                    clientesMap.set(clave, {
+                        ...existente,
+                        FECHA_ULTIMA_COMPRA: c.FECHA_ULTIMA_COMPRA,
+                        NUM_ALMA: c.NUM_ALMA,
+                        CANT_TOT: c.CANT_TOT
+                    });
+                }
+            }
+        };
+
+        res2.forEach(procesar);
+        res3.forEach(procesar);
+
+        const arrayFinal = Array.from(clientesMap.values());
+        
+        // Replicar el comportamiento del ORDER BY NULLS FIRST, ASC en memoria
+        arrayFinal.sort((a, b) => {
+            const dateA = a.FECHA_ULTIMA_COMPRA ? new Date(a.FECHA_ULTIMA_COMPRA).getTime() : 0;
+            const dateB = b.FECHA_ULTIMA_COMPRA ? new Date(b.FECHA_ULTIMA_COMPRA).getTime() : 0;
+            
+            // Nulls (ceros) van primero
+            if (dateA === 0 && dateB !== 0) return -1;
+            if (dateB === 0 && dateA !== 0) return 1;
+            
+            return dateA - dateB;
+        });
+
+        return arrayFinal;
     }
-
-    // Ordenamos por la FECHA_ULTIMA_COMPRA (Nulls al principio, luego fechas antiguas)
-    sql += ` ORDER BY T.FECHA_ULTIMA_COMPRA ASC NULLS FIRST`;
-
-    const resultados = await database.query(sql, params);
-    return resultados;
 };
 
 module.exports = {
