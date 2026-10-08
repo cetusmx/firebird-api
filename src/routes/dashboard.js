@@ -170,17 +170,18 @@ router.get('/ventas-tendencia', async (req, res) => {
             GROUP BY 1, 2, 3
             ORDER BY 1, 2`;
 
-        // Query base para Empresa 3 (Fresnillo)
+        // Query base para Empresa 3 (Fresnillo + Mazatlán + Zacatecas migradas)
         const sqlBase3 = (tabla) => `
             SELECT 
                 EXTRACT(YEAR FROM FECHA_DOC) as ANIO,
                 EXTRACT(MONTH FROM FECHA_DOC) as MES,
+                NUM_ALMA,
                 SUM(CAN_TOT) as TOTAL
             FROM ${tabla}
             WHERE STATUS <> 'C' AND TRIM(CVE_CLPV) <> '2257'
             AND FECHA_DOC BETWEEN '${fechaInicio}' AND '${fechaFin}'
             ${tabla.includes('FACTR') ? "AND (COALESCE(TIP_DOC_SIG, '') <> 'F')" : ""}
-            GROUP BY 1, 2
+            GROUP BY 1, 2, 3
             ORDER BY 1, 2`;
 
         // Ejecución en paralelo
@@ -228,11 +229,13 @@ router.get('/ventas-tendencia', async (req, res) => {
             }
         });
 
-        // 4. Poblar datos de Empresa 3 (Fresnillo)
+        // 4. Poblar datos de Empresa 3 (Fresnillo / Migrados)
         [...f3, ...r3].forEach(row => {
             const key = `${row.ANIO}-${String(row.MES).padStart(2, '0')}`;
-            if (mesesMap[key]) {
-                mesesMap[key]["Fresnillo"] = round2(mesesMap[key]["Fresnillo"] + row.TOTAL);
+            const targetId = String(row.NUM_ALMA) === '3' ? '10' : row.NUM_ALMA;
+            const nombreSucursal = ALMACENES_MAP[targetId];
+            if (mesesMap[key] && nombreSucursal) {
+                mesesMap[key][nombreSucursal] = round2(mesesMap[key][nombreSucursal] + row.TOTAL);
             }
         });
 
