@@ -218,10 +218,12 @@ async function enrichWithPrecios(data, sucursal, listaPrecios) {
   const placeholders = ids.map(() => '?').join(',');
   const cveLista = listaPrecios ? listaPrecios.toString() : '4';
 
-  // Usamos toString() para que '3' == 3
-  const esSucursal3 = sucursal && sucursal.toString() === '3';
-  const connection = esSucursal3 ? db3 : db;
-  const table = esSucursal3 ? 'PRECIO_X_PROD03' : 'PRECIO_X_PROD02';
+  // Verificamos si la sucursal corresponde a la base migrada (Fresnillo, Mazatlán, Zacatecas)
+  const sucursalesMigradas = ['3', '5', '6'];
+  const esMigrada = sucursal && sucursalesMigradas.includes(sucursal.toString());
+  
+  const connection = esMigrada ? db3 : db;
+  const table = esMigrada ? 'PRECIO_X_PROD03' : 'PRECIO_X_PROD02';
 
   const sql = `SELECT TRIM(CVE_ART) AS ART, PRECIO FROM ${table} WHERE TRIM(CVE_PRECIO) = CAST(? AS VARCHAR(10)) AND CVE_ART IN (${placeholders})`;
 
@@ -878,6 +880,7 @@ app.get('/clavesalternas/search2', async (req, res) => {
 app.get('/clavesalternas/search3', async (req, res) => {
   const q = req.query.q || req.query.query;
   const sucursal = req.query.sucursal || req.query.SUCURSAL;
+  const lista_precios = req.query.lista_precios || req.query.LISTA_PRECIOS;
 
   if (!q || q.length < 2) {
     return res.json([]);
@@ -918,7 +921,7 @@ app.get('/clavesalternas/search3', async (req, res) => {
     //console.log("Productoss: ",productos);
     // Usamos tus funciones de enriquecimiento tal cual están en tu index.js
     // 1. Enriquecer con Precios (Línea 1056 aprox)
-    let productosConPrecios = await enrichWithPrecios(productos);
+    let productosConPrecios = await enrichWithPrecios(productos, sucursal, lista_precios);
     
     // 2. Enriquecer con Último Costo (Línea 1076 aprox)
     let productosCompletos = await enrichWithUltimoCosto(productosConPrecios);
