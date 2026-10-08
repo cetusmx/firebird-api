@@ -40,24 +40,26 @@ router.get('/ventas-resumen', async (req, res) => {
             AND EXTRACT(YEAR FROM FECHA_DOC) = ?
             GROUP BY NUM_ALMA`;
 
-        // --- QUERIES EMPRESA 03 (Fresnillo) ---
+        // --- QUERIES EMPRESA 03 (Fresnillo + Mazatlán + Zacatecas migradas) ---
         // Usamos TRIM para asegurar la exclusión del cliente 2257
         const sqlFacturas3 = `
-            SELECT SUM(CAN_TOT) as TOTAL 
+            SELECT NUM_ALMA, SUM(CAN_TOT) as TOTAL 
             FROM FACTF03 
             WHERE TIP_DOC = 'F' AND STATUS <> 'C' 
             AND TRIM(CVE_CLPV) <> '2257'
             AND EXTRACT(MONTH FROM FECHA_DOC) = ? 
-            AND EXTRACT(YEAR FROM FECHA_DOC) = ?`;
+            AND EXTRACT(YEAR FROM FECHA_DOC) = ?
+            GROUP BY NUM_ALMA`;
 
         const sqlRemisiones3 = `
-            SELECT SUM(CAN_TOT) as TOTAL 
+            SELECT NUM_ALMA, SUM(CAN_TOT) as TOTAL 
             FROM FACTR03 
             WHERE TIP_DOC = 'R' AND STATUS <> 'C' 
             AND TRIM(CVE_CLPV) <> '2257'
             AND (COALESCE(TIP_DOC_SIG, '') <> 'F')
             AND EXTRACT(MONTH FROM FECHA_DOC) = ? 
-            AND EXTRACT(YEAR FROM FECHA_DOC) = ?`;
+            AND EXTRACT(YEAR FROM FECHA_DOC) = ?
+            GROUP BY NUM_ALMA`;
 
         const [f2, r2, f3, r3] = await Promise.all([
             db.query(sqlFacturas2, [mes, anio]),
@@ -89,13 +91,20 @@ router.get('/ventas-resumen', async (req, res) => {
             }
         });
 
-        // Procesar Fresnillo (03) -> Mapeado a ID 10
-        if (f3 && f3[0] && f3[0].TOTAL) {
-            reporteSucursales['10'].ventas_facturadas += round2(f3[0].TOTAL);
-        }
-        if (r3 && r3[0] && r3[0].TOTAL) {
-            reporteSucursales['10'].ventas_remisiones += round2(r3[0].TOTAL);
-        }
+        // Procesar Datos Fresnillo / Migrados (03)
+        // Nota: Fresnillo internamente es el almacén 3, pero se reporta como 10
+        f3.forEach(row => {
+            const targetId = String(row.NUM_ALMA) === '3' ? '10' : row.NUM_ALMA;
+            if (reporteSucursales[targetId]) {
+                reporteSucursales[targetId].ventas_facturadas += round2(row.TOTAL);
+            }
+        });
+        r3.forEach(row => {
+            const targetId = String(row.NUM_ALMA) === '3' ? '10' : row.NUM_ALMA;
+            if (reporteSucursales[targetId]) {
+                reporteSucursales[targetId].ventas_remisiones += round2(row.TOTAL);
+            }
+        });
 
         // Totales Finales
         let globalF = 0;
