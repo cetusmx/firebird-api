@@ -195,5 +195,99 @@ router.post('/productos/consulta', async (req, res) => {
     }
 });
 
+router.post('/productos-recepcion', async (req, res) => {
+    try {
+        const { rfc, claves_proveedor } = req.body;
+
+        if (!rfc || !Array.isArray(claves_proveedor) || claves_proveedor.length === 0) {
+            return res.status(400).json({ error: 'Se requiere "rfc" y un arreglo "claves_proveedor" con al menos un elemento.' });
+        }
+
+        const clavesLimpias = claves_proveedor
+            .filter(c => typeof c === 'string' && c.trim() !== '')
+            .map(c => c.trim());
+
+        if (clavesLimpias.length === 0) {
+            return res.status(400).json({ error: 'El arreglo "claves_proveedor" no contiene datos válidos.' });
+        }
+
+        let campoPrincipal = "";
+        let clpvAlterno = "";
+
+        if (rfc === 'CSM030620TJ2') {
+            // Proveedor LC
+            campoPrincipal = 'C.CAMPLIB16';
+            clpvAlterno = '3';
+        } else if (rfc === 'SRS080522T77') {
+            // Proveedor SYR
+            campoPrincipal = 'C.CAMPLIB15';
+            clpvAlterno = '35';
+        } else {
+            return res.status(400).json({ error: 'RFC no soportado para esta operación.' });
+        }
+
+        // Dividir claves a buscar en chunks de 1000 para evitar errores de Firebird en cláusulas IN
+        const chunkSize = 1000;
+        let registrosEncontrados = [];
+
+        for (let i = 0; i < clavesLimpias.length; i += chunkSize) {
+            const chunk = clavesLimpias.slice(i, i + chunkSize);
+            const placeholders = chunk.map(() => '?').join(',');
+
+            // Buscamos productos donde coincida la clave ya sea en el principal o en la alterna.
+            const sql = `
+                SELECT 
+                    TRIM(I.CVE_ART) AS CVE_ART,
+                    TRIM(${campoPrincipal}) AS CLAVE_PRINCIPAL,
+                    TRIM(A.CVE_ALTER) AS CLAVE_ALTERNA
+                FROM INVE02 I
+                LEFT JOIN INVE_CLIB02 C ON I.CVE_ART = C.CVE_PROD
+                LEFT JOIN CVES_ALTER02 A ON I.CVE_ART = A.CVE_ART AND TRIM(A.CVE_CLPV) = '${clpvAlterno}'
+                WHERE I.STATUS = 'A' AND (
+                    TRIM(${campoPrincipal}) IN (${placeholders})
+                    OR TRIM(A.CVE_ALTER) IN (${placeholders})
+                )
+            `;
+
+            // Al enviar chunk + chunk, llenamos los dos IN (...)
+            const chunkRes = await db.query(sql, [...chunk, ...chunk]);
+            registrosEncontrados.push(...chunkRes);
+        }
+
+        // Construir resultado final
+        const resultados = clavesLimpias.map(claveReq => {
+            let nuestraClave = "SIN REGISTRO";
+
+            // Buscar en los registros cuál empataría como "efectivo" para esta claveReq
+            const match = registrosEncontrados.find(row => {
+                let claveEfectiva = "";
+                if (row.CLAVE_PRINCIPAL && row.CLAVE_PRINCIPAL !== "FUERA CATALOGO") {
+                    claveEfectiva = row.CLAVE_PRINCIPAL;
+                } else if (row.CLAVE_ALTERNA && row.CLAVE_ALTERNA !== "FUERA CATALOGO") {
+                    claveEfectiva = row.CLAVE_ALTERNA;
+                } else {
+                    claveEfectiva = "FUERA CATALOGO";
+                }
+                return claveEfectiva === claveReq;
+            });
+
+            if (match) {
+                nuestraClave = match.CVE_ART;
+            }
+
+            return {
+                clave_proveedor: claveReq,
+                nuestra_clave: nuestraClave
+            };
+        });
+
+        res.json({ resultados });
+
+    } catch (error) {
+        console.error("Error en endpoint POST /productos-recepcion:", error.message);
+        res.status(500).json({ error: "Error interno al buscar claves.", detalle: error.message });
+    }
+});
+
 module.exports = router;
 
