@@ -1481,9 +1481,8 @@ app.get('/clavesalternas/catalogo', async (req, res) => {
   const numLimit = parseInt(limit) || 10;
   const numOffset = parseInt(offset) || 0;
 
-  // Determinar tabla de precios para el filtro inicial
-  const esSucursal3 = SUCURSAL && SUCURSAL.toString() === '3';
-  const priceTable = esSucursal3 ? 'PRECIO_X_PROD03' : 'PRECIO_X_PROD02';
+  // Determinar tabla de precios para el filtro inicial en Empresa 02 (db)
+  const priceTable = 'PRECIO_X_PROD02';
   const cveLista = lista_precios ? lista_precios.toString() : '4';
 
   // FILTROS: 
@@ -1529,13 +1528,31 @@ app.get('/clavesalternas/catalogo', async (req, res) => {
     dataResult = await enrichWithPrecios(dataResult, SUCURSAL, lista_precios);
     dataResult = await enrichWithUltimoCosto(dataResult);
 
+    // Inyección de existencias de Empresa 3 (Fresnillo, Mazatlán, Zacatecas)
     if (dataResult.length > 0) {
       const ids = dataResult.map(item => item.CVE_ART.trim());
-      const sql3 = `SELECT TRIM(CVE_ART) AS ART, EXIST FROM MULT03 WHERE CVE_ALM = 3 AND CVE_ART IN (${ids.map(() => '?').join(',')})`;
+      const sql3 = `SELECT TRIM(CVE_ART) AS ART, CVE_ALM, EXIST FROM MULT03 WHERE CVE_ALM IN (3, 5, 6) AND CVE_ART IN (${ids.map(() => '?').join(',')})`;
       const res3 = await db3.query(sql3, ids);
+
       const map3 = {};
-      res3.forEach(r => map3[r.ART] = r.EXIST);
-      dataResult = dataResult.map(item => ({ ...item, ALM_10_EXIST: map3[item.CVE_ART.trim()] || 0 }));
+      const map5 = {};
+      const map6 = {};
+
+      res3.forEach(r => {
+        if (r.CVE_ALM === 3) map3[r.ART] = r.EXIST;
+        if (r.CVE_ALM === 5) map5[r.ART] = r.EXIST;
+        if (r.CVE_ALM === 6) map6[r.ART] = r.EXIST;
+      });
+
+      dataResult = dataResult.map(item => {
+        const art = item.CVE_ART.trim();
+        return {
+          ...item,
+          ALM_10_EXIST: map3[art] || 0,
+          ALM_5_EXIST: map5[art] !== undefined ? map5[art] : item.ALM_5_EXIST,
+          ALM_6_EXIST: map6[art] !== undefined ? map6[art] : item.ALM_6_EXIST
+        };
+      });
     }
 
     res.json({
@@ -1589,9 +1606,16 @@ app.get('/clavesalternas/catalogo/:clave', async (req, res) => {
     dataResult = await enrichWithUltimoCosto(dataResult);
 
     const id = dataResult[0].CVE_ART.trim();
-    const sql3 = `SELECT EXIST FROM MULT03 WHERE CVE_ALM = 3 AND CVE_ART = ?`;
+    const sql3 = `SELECT CVE_ALM, EXIST FROM MULT03 WHERE CVE_ALM IN (3, 5, 6) AND CVE_ART = ?`;
     const res3 = await db3.query(sql3, [id]);
-    dataResult[0].ALM_10_EXIST = res3.length > 0 ? res3[0].EXIST : 0;
+
+    let exist3 = 0;
+    res3.forEach(r => {
+      if (r.CVE_ALM === 3) exist3 = r.EXIST;
+      if (r.CVE_ALM === 5) dataResult[0].ALM_5_EXIST = r.EXIST;
+      if (r.CVE_ALM === 6) dataResult[0].ALM_6_EXIST = r.EXIST;
+    });
+    dataResult[0].ALM_10_EXIST = exist3;
 
     const finalData = processExistencias(dataResult);
     res.json(finalData[0]);
