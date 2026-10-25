@@ -292,16 +292,16 @@ router.post('/productos-recepcion', async (req, res) => {
 
 router.post('/productos/productos-etiquetas-caja', async (req, res) => {
     try {
-        const listaEntrada = req.body.productos || req.body.claves || req.body.lineas;
+        const { linea } = req.body;
 
-        if (!Array.isArray(listaEntrada) || listaEntrada.length === 0) {
+        if (!Array.isArray(linea) || linea.length === 0) {
             return res.status(400).json({
-                error: 'Se requiere un arreglo "productos" (o "claves" / "lineas") con al menos un elemento.'
+                error: 'El formato esperado es { "linea": ["ORING"] } con al menos un elemento.'
             });
         }
 
         const lineasLimpias = [...new Set(
-            listaEntrada
+            linea
                 .filter(l => typeof l === 'string' && l.trim() !== '')
                 .map(l => l.trim().toUpperCase())
         )];
