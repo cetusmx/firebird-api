@@ -292,52 +292,66 @@ router.post('/productos-recepcion', async (req, res) => {
 
 router.post('/productos/productos-etiquetas-caja', async (req, res) => {
     try {
-        const listaEntrada = req.body.productos || req.body.claves;
+        const listaEntrada = req.body.productos || req.body.claves || req.body.lineas;
 
         if (!Array.isArray(listaEntrada) || listaEntrada.length === 0) {
             return res.status(400).json({
-                error: 'Se requiere un arreglo "productos" (o "claves") con al menos un elemento.'
+                error: 'Se requiere un arreglo "productos" (o "claves" / "lineas") con al menos un elemento.'
             });
         }
 
-        const clavesLimpias = [...new Set(
+        const lineasLimpias = [...new Set(
             listaEntrada
-                .filter(c => typeof c === 'string' && c.trim() !== '')
-                .map(c => c.trim())
+                .filter(l => typeof l === 'string' && l.trim() !== '')
+                .map(l => l.trim().toUpperCase())
         )];
 
-        if (clavesLimpias.length === 0) {
-            return res.status(400).json({ error: 'El arreglo proporcionado no contiene claves válidas.' });
+        if (lineasLimpias.length === 0) {
+            return res.status(400).json({ error: 'El arreglo proporcionado no contiene líneas válidas.' });
         }
 
+        const placeholdersLineas = lineasLimpias.map(() => '?').join(',');
+
+        // 1. Consulta en Empresa 02: todos los productos activos pertenecientes a la(s) línea(s) + Almacenes 1 y 7
+        const sqlEmp2 = `
+            SELECT 
+                TRIM(T1.CVE_ART) AS CVE_ART,
+                TRIM(T1.DESCR) AS DESCR,
+                TRIM(T1.LIN_PROD) AS LIN_PROD,
+                TRIM(T1.CVE_UNIDAD) AS CVE_UNIDAD,
+                TRIM(T4.CAMPLIB22) AS FAMILIA,
+                TRIM(T4.CAMPLIB13) AS PERFIL,
+                TRIM(T4.CAMPLIB1) AS DIAM_INT,
+                TRIM(T4.CAMPLIB2) AS DIAM_EXT,
+                TRIM(T4.CAMPLIB3) AS ALTURA,
+                TRIM(T4.CAMPLIB7) AS SECCION,
+                TRIM(T4.CAMPLIB9) AS MARCA,
+                COALESCE(MAX(CASE WHEN T6.CVE_ALM = 1 THEN T6.EXIST ELSE NULL END), 0) AS ALM_1_EXIST,
+                COALESCE(MAX(CASE WHEN T6.CVE_ALM = 7 THEN T6.EXIST ELSE NULL END), 0) AS ALM_7_EXIST
+            FROM INVE02 T1
+            LEFT JOIN INVE_CLIB02 T4 ON T1.CVE_ART = T4.CVE_PROD
+            LEFT JOIN MULT02 T6 ON T1.CVE_ART = T6.CVE_ART AND T6.CVE_ALM IN (1, 7)
+            WHERE T1.STATUS = 'A'
+              AND UPPER(TRIM(T1.LIN_PROD)) IN (${placeholdersLineas})
+            GROUP BY 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11
+            ORDER BY 1 ASC
+        `;
+
+        const productosBase = await db.query(sqlEmp2, lineasLimpias);
+
+        if (productosBase.length === 0) {
+            return res.json([]);
+        }
+
+        // 2. Consulta en Empresa 03 (Almacenes 3, 5 y 6) en lotes de 500 claves para no saturar el IN de Firebird
+        const clavesEncontradas = productosBase.map(p => p.CVE_ART);
         const chunkSize = 500;
-        const productosBase = [];
         const existenciasEmp3Map = {};
 
-        for (let i = 0; i < clavesLimpias.length; i += chunkSize) {
-            const chunk = clavesLimpias.slice(i, i + chunkSize);
-            const placeholders = chunk.map(() => '?').join(',');
+        for (let i = 0; i < clavesEncontradas.length; i += chunkSize) {
+            const chunk = clavesEncontradas.slice(i, i + chunkSize);
+            const placeholdersClaves = chunk.map(() => '?').join(',');
 
-            // 1. Consulta en Empresa 02 (Datos maestros + Almacenes 1 y 7)
-            const sqlEmp2 = `
-                SELECT 
-                    TRIM(T1.CVE_ART) AS CVE_ART,
-                    TRIM(T1.DESCR) AS DESCR,
-                    TRIM(T1.LIN_PROD) AS LIN_PROD,
-                    TRIM(T1.CVE_UNIDAD) AS CVE_UNIDAD,
-                    TRIM(T4.CAMPLIB22) AS FAMILIA,
-                    TRIM(T4.CAMPLIB13) AS PERFIL,
-                    COALESCE(MAX(CASE WHEN T6.CVE_ALM = 1 THEN T6.EXIST ELSE NULL END), 0) AS ALM_1_EXIST,
-                    COALESCE(MAX(CASE WHEN T6.CVE_ALM = 7 THEN T6.EXIST ELSE NULL END), 0) AS ALM_7_EXIST
-                FROM INVE02 T1
-                LEFT JOIN INVE_CLIB02 T4 ON T1.CVE_ART = T4.CVE_PROD
-                LEFT JOIN MULT02 T6 ON T1.CVE_ART = T6.CVE_ART AND T6.CVE_ALM IN (1, 7)
-                WHERE TRIM(T1.CVE_ART) IN (${placeholders})
-                GROUP BY 1, 2, 3, 4, 5, 6
-                ORDER BY 1 ASC
-            `;
-
-            // 2. Consulta en Empresa 03 (Almacenes 3, 5 y 6)
             const sqlEmp3 = `
                 SELECT 
                     TRIM(CVE_ART) AS ART, 
@@ -345,15 +359,10 @@ router.post('/productos/productos-etiquetas-caja', async (req, res) => {
                     EXIST 
                 FROM MULT03 
                 WHERE CVE_ALM IN (3, 5, 6) 
-                  AND TRIM(CVE_ART) IN (${placeholders})
+                  AND TRIM(CVE_ART) IN (${placeholdersClaves})
             `;
 
-            const [resEmp2, resEmp3] = await Promise.all([
-                db.query(sqlEmp2, chunk),
-                db3.query(sqlEmp3, chunk)
-            ]);
-
-            productosBase.push(...resEmp2);
+            const resEmp3 = await db3.query(sqlEmp3, chunk);
 
             resEmp3.forEach(row => {
                 const art = row.ART;
@@ -376,6 +385,11 @@ router.post('/productos/productos-etiquetas-caja', async (req, res) => {
                 CVE_UNIDAD: item.CVE_UNIDAD || '',
                 FAMILIA: item.FAMILIA || '',
                 PERFIL: item.PERFIL || '',
+                DIAM_INT: item.DIAM_INT || '',
+                DIAM_EXT: item.DIAM_EXT || '',
+                ALTURA: item.ALTURA || '',
+                SECCION: item.SECCION || '',
+                MARCA: item.MARCA || '',
                 EXISTENCIA: {
                     Durango: item.ALM_1_EXIST ? parseFloat(item.ALM_1_EXIST) : 0,
                     Mazatlán: exist3['5'] ? parseFloat(exist3['5']) : 0,
