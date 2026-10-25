@@ -334,7 +334,7 @@ router.post('/productos/productos-etiquetas-caja', async (req, res) => {
                 LEFT JOIN MULT02 T6 ON T1.CVE_ART = T6.CVE_ART AND T6.CVE_ALM IN (1, 7)
                 WHERE TRIM(T1.CVE_ART) IN (${placeholders})
                 GROUP BY 1, 2, 3, 4, 5, 6
-                ORDER BY T1.CVE_ART ASC
+                ORDER BY 1 ASC
             `;
 
             // 2. Consulta en Empresa 03 (Almacenes 3, 5 y 6)
