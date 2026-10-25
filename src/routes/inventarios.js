@@ -1,6 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const db = require('../db');
+const db3 = require('../db3');
 
 router.get('/productos', async (req, res) => {
     console.log("Datos recibidos: ", req.query);
@@ -286,6 +287,110 @@ router.post('/productos-recepcion', async (req, res) => {
     } catch (error) {
         console.error("Error en endpoint POST /productos-recepcion:", error.message);
         res.status(500).json({ error: "Error interno al buscar claves.", detalle: error.message });
+    }
+});
+
+router.post('/productos/productos-etiquetas-caja', async (req, res) => {
+    try {
+        const listaEntrada = req.body.productos || req.body.claves;
+
+        if (!Array.isArray(listaEntrada) || listaEntrada.length === 0) {
+            return res.status(400).json({
+                error: 'Se requiere un arreglo "productos" (o "claves") con al menos un elemento.'
+            });
+        }
+
+        const clavesLimpias = [...new Set(
+            listaEntrada
+                .filter(c => typeof c === 'string' && c.trim() !== '')
+                .map(c => c.trim())
+        )];
+
+        if (clavesLimpias.length === 0) {
+            return res.status(400).json({ error: 'El arreglo proporcionado no contiene claves válidas.' });
+        }
+
+        const chunkSize = 500;
+        const productosBase = [];
+        const existenciasEmp3Map = {};
+
+        for (let i = 0; i < clavesLimpias.length; i += chunkSize) {
+            const chunk = clavesLimpias.slice(i, i + chunkSize);
+            const placeholders = chunk.map(() => '?').join(',');
+
+            // 1. Consulta en Empresa 02 (Datos maestros + Almacenes 1 y 7)
+            const sqlEmp2 = `
+                SELECT 
+                    TRIM(T1.CVE_ART) AS CVE_ART,
+                    TRIM(T1.DESCR) AS DESCR,
+                    TRIM(T1.LIN_PROD) AS LIN_PROD,
+                    TRIM(T1.CVE_UNIDAD) AS CVE_UNIDAD,
+                    TRIM(T4.CAMPLIB22) AS FAMILIA,
+                    TRIM(T4.CAMPLIB13) AS PERFIL,
+                    COALESCE(MAX(CASE WHEN T6.CVE_ALM = 1 THEN T6.EXIST ELSE NULL END), 0) AS ALM_1_EXIST,
+                    COALESCE(MAX(CASE WHEN T6.CVE_ALM = 7 THEN T6.EXIST ELSE NULL END), 0) AS ALM_7_EXIST
+                FROM INVE02 T1
+                LEFT JOIN INVE_CLIB02 T4 ON T1.CVE_ART = T4.CVE_PROD
+                LEFT JOIN MULT02 T6 ON T1.CVE_ART = T6.CVE_ART AND T6.CVE_ALM IN (1, 7)
+                WHERE TRIM(T1.CVE_ART) IN (${placeholders})
+                GROUP BY 1, 2, 3, 4, 5, 6
+                ORDER BY T1.CVE_ART ASC
+            `;
+
+            // 2. Consulta en Empresa 03 (Almacenes 3, 5 y 6)
+            const sqlEmp3 = `
+                SELECT 
+                    TRIM(CVE_ART) AS ART, 
+                    CVE_ALM, 
+                    EXIST 
+                FROM MULT03 
+                WHERE CVE_ALM IN (3, 5, 6) 
+                  AND TRIM(CVE_ART) IN (${placeholders})
+            `;
+
+            const [resEmp2, resEmp3] = await Promise.all([
+                db.query(sqlEmp2, chunk),
+                db3.query(sqlEmp3, chunk)
+            ]);
+
+            productosBase.push(...resEmp2);
+
+            resEmp3.forEach(row => {
+                const art = row.ART;
+                if (!existenciasEmp3Map[art]) {
+                    existenciasEmp3Map[art] = {};
+                }
+                existenciasEmp3Map[art][String(row.CVE_ALM)] = row.EXIST;
+            });
+        }
+
+        // 3. Armar respuesta con el objeto EXISTENCIA por sucursal
+        const resultado = productosBase.map(item => {
+            const art = item.CVE_ART;
+            const exist3 = existenciasEmp3Map[art] || {};
+
+            return {
+                CVE_ART: art,
+                DESCR: item.DESCR || '',
+                LIN_PROD: item.LIN_PROD || '',
+                CVE_UNIDAD: item.CVE_UNIDAD || '',
+                FAMILIA: item.FAMILIA || '',
+                PERFIL: item.PERFIL || '',
+                EXISTENCIA: {
+                    Durango: item.ALM_1_EXIST ? parseFloat(item.ALM_1_EXIST) : 0,
+                    Mazatlán: exist3['5'] ? parseFloat(exist3['5']) : 0,
+                    Zacatecas: exist3['6'] ? parseFloat(exist3['6']) : 0,
+                    Querétaro: item.ALM_7_EXIST ? parseFloat(item.ALM_7_EXIST) : 0,
+                    Fresnillo: exist3['3'] ? parseFloat(exist3['3']) : 0
+                }
+            };
+        });
+
+        res.json(resultado);
+
+    } catch (error) {
+        console.error("Error en endpoint POST /productos/productos-etiquetas-caja:", error.message);
+        res.status(500).json({ error: "Error interno al obtener productos para etiquetas de caja.", detalle: error.message });
     }
 });
 
