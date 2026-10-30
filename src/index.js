@@ -1203,11 +1203,12 @@ app.get('/clavesalternas/filter', async (req, res) => {
 /**
  * 2. GET /api/clavesalternas/filter-ranges-v2
  * Búsqueda Acotada por Rangos para Equivalencias.
- * Evalúa estrictamente Familia, Sistema de Medición, y rangos de Diámetro Interior y Exterior.
+ * Evalúa estrictamente Familia, Sistema de Medición, múltiples Perfiles,
+ * y rangos de Diámetro Interior y Exterior.
  */
 app.get('/api/clavesalternas/filter-ranges-v2', async (req, res) => {
   const { 
-    lista_precios, SUCURSAL, familia, sist_med,
+    lista_precios, SUCURSAL, familia, sist_med, perfil,
     diam_int_min, diam_int_max, diam_ext_min, diam_ext_max,
     limit, offset 
   } = req.query;
@@ -1254,6 +1255,16 @@ app.get('/api/clavesalternas/filter-ranges-v2', async (req, res) => {
   if (sist_med) {
     whereClauses.push(`TRIM(COALESCE(T4.CAMPLIB17, '')) = ?`);
     params.push(sist_med.trim().toLowerCase());
+  }
+
+  // 4. Filtro de Múltiples Perfiles (CAMPLIB13) con cláusulas OR dinámicas
+  if (perfil && perfil.trim() !== '') {
+    const listPerfiles = perfil.split(',').map(p => p.trim().toUpperCase()).filter(p => p !== '');
+    if (listPerfiles.length > 0) {
+      const orConditions = listPerfiles.map(() => `UPPER(TRIM(COALESCE(T4.CAMPLIB13, ''))) = ?`);
+      whereClauses.push(`(${orConditions.join(' OR ')})`);
+      params.push(...listPerfiles);
+    }
   }
 
   const whereString = `WHERE ${whereClauses.join(' AND ')}`;
