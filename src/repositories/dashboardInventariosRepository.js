@@ -1,7 +1,8 @@
-const db = require('../db'); // Conexión a Empresa 2
+const db = require('../db');   // Conexión a Empresa 2
+const db3 = require('../db3'); // Conexión a Empresa 3
 
 /**
- * Consulta a Firebird los movimientos de inventario (MINVE02) y catálogos (INVE_CLIB02)
+ * Consulta a Firebird los movimientos de inventario (MINVE02 y MINVE03) y catálogos (INVE_CLIB02)
  * dividiendo las claves en bloques para respetar los límites de la base de datos.
  */
 const obtenerMovimientosYClasificacion = async (refer, productos) => {
@@ -10,13 +11,14 @@ const obtenerMovimientosYClasificacion = async (refer, productos) => {
     
     // Limpieza de espacios para evitar fallos de strings binarios en Firebird
     const cleanedClaves = productos.map(p => String(p).trim());
+    const referLimpio = refer.trim();
 
     for (let i = 0; i < cleanedClaves.length; i += chunkSize) {
         const chunk = cleanedClaves.slice(i, i + chunkSize);
         const placeholders = chunk.map(() => '?').join(',');
 
-        // TRIM() en el JOIN y en el WHERE para que Firebird pueda emparejar las claves correctamente
-        const sql = `
+        // 1. Consulta en Empresa 02: Catálogo (INVE_CLIB02) + Movimientos en MINVE02
+        const sqlEmp2 = `
             SELECT 
                 TRIM(C.CVE_PROD) as "CVE_ART",
                 TRIM(M.REFER) as "REFER",
@@ -32,12 +34,54 @@ const obtenerMovimientosYClasificacion = async (refer, productos) => {
                                 AND M.CVE_CPTO IN (10, 60)
             WHERE TRIM(C.CVE_PROD) IN (${placeholders})
         `;
+
+        // 2. Consulta en Empresa 03: Movimientos en MINVE03 para el mismo refer
+        const sqlEmp3 = `
+            SELECT 
+                TRIM(M.CVE_ART) as "CVE_ART",
+                TRIM(M.REFER) as "REFER",
+                M.CVE_CPTO as "CVE_CPTO",
+                M.COSTO as "COSTO",
+                M.CANT as "CANT"
+            FROM MINVE03 M
+            WHERE TRIM(M.REFER) = ?
+              AND M.CVE_CPTO IN (10, 60)
+              AND TRIM(M.CVE_ART) IN (${placeholders})
+        `;
         
-        const queryParams = [refer.trim(), ...chunk];
-        const chunkRes = await db.query(sql, queryParams);
-        dbResults.push(...chunkRes);
+        const queryParams = [referLimpio, ...chunk];
+
+        const [chunkRes2, chunkRes3] = await Promise.all([
+            db.query(sqlEmp2, queryParams),
+            db3.query(sqlEmp3, queryParams)
+        ]);
+
+        dbResults.push(...chunkRes2);
+
+        // Si hubo movimientos en Empresa 03 (MINVE03), les inyectamos su clasificación del catálogo (INVE_CLIB02)
+        if (chunkRes3.length > 0) {
+            const catalogoMap = {};
+            chunkRes2.forEach(r => {
+                if (!catalogoMap[r.CVE_ART]) {
+                    catalogoMap[r.CVE_ART] = {
+                        FAMILIA: r.FAMILIA || "",
+                        GENERO: r.GENERO || "",
+                        CATEGORIA: r.CATEGORIA || ""
+                    };
+                }
+            });
+
+            chunkRes3.forEach(mov3 => {
+                const cat = catalogoMap[mov3.CVE_ART] || { FAMILIA: "", GENERO: "", CATEGORIA: "" };
+                dbResults.push({
+                    ...mov3,
+                    FAMILIA: cat.FAMILIA,
+                    GENERO: cat.GENERO,
+                    CATEGORIA: cat.CATEGORIA
+                });
+            });
+        }
     }
-    //console.log("Resultados: ", dbResults);
 
     return dbResults;
 };
