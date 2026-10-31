@@ -35,7 +35,7 @@ const obtenerMovimientosYClasificacion = async (refer, productos) => {
             WHERE TRIM(C.CVE_PROD) IN (${placeholders})
         `;
 
-        // 2. Consulta en Empresa 03: Movimientos en MINVE03 para el mismo refer
+        // 2. Consulta en Empresa 03: Movimientos en MINVE03 para el mismo refer (Conceptos 10 y 62)
         const sqlEmp3 = `
             SELECT 
                 TRIM(M.CVE_ART) as "CVE_ART",
@@ -45,7 +45,7 @@ const obtenerMovimientosYClasificacion = async (refer, productos) => {
                 M.CANT as "CANT"
             FROM MINVE03 M
             WHERE TRIM(M.REFER) = ?
-              AND M.CVE_CPTO IN (10, 60)
+              AND M.CVE_CPTO IN (10, 62)
               AND TRIM(M.CVE_ART) IN (${placeholders})
         `;
         

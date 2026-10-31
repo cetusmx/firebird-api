@@ -53,7 +53,7 @@ const getAsertividadCiclico = async (req, res) => {
                 const cant = parseFloat(mov.CANT) || 0;
                 
                 if (cpto === 10) totalAjuste += cant;
-                if (cpto === 60) totalMerma += cant;
+                if (cpto === 60 || cpto === 62) totalMerma += cant;
             });
 
             // Reglas de negocio para el Neteo
