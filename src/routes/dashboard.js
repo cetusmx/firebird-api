@@ -487,6 +487,7 @@ router.get('/ventas-detalle-partidas', async (req, res) => {
             tip_doc_sig: row.TIP_DOC_SIG,
             doc_sig: row.DOC_SIG,
             num_par: row.NUM_PAR,
+            CVE_ART: row.CVE_ART,
             cve_art: row.CVE_ART,
             descripcion: row.DESCR,
             cantidad: row.CANT || 0,
