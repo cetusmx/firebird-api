@@ -248,4 +248,160 @@ router.get('/ventas-tendencia', async (req, res) => {
     }
 });
 
+/**
+ * GET /api/dashboard/ventas-detalle
+ * Descarga registro por registro todos los documentos contabilizados en /ventas-resumen
+ * Parámetros opcionales: ?mes=10&anio=2026&sucursal=5
+ */
+router.get('/ventas-detalle', async (req, res) => {
+    const now = new Date();
+    const mes = parseInt(req.query.mes) || (now.getMonth() + 1);
+    const anio = parseInt(req.query.anio) || now.getFullYear();
+    const filtroSucursal = req.query.sucursal ? String(req.query.sucursal).trim() : null;
+
+    try {
+        const camposSelect = `
+            TRIM(CVE_DOC) AS FOLIO,
+            TIP_DOC,
+            FECHA_DOC,
+            STATUS,
+            TRIM(CVE_CLPV) AS CLIENTE,
+            NUM_ALMA,
+            CAN_TOT,
+            IMPORTE,
+            TRIM(COALESCE(TIP_DOC_ANT, '')) AS TIP_DOC_ANT,
+            TRIM(COALESCE(DOC_ANT, '')) AS DOC_ANT,
+            TRIM(COALESCE(TIP_DOC_SIG, '')) AS TIP_DOC_SIG,
+            TRIM(COALESCE(DOC_SIG, '')) AS DOC_SIG
+        `;
+
+        // --- QUERIES EMPRESA 02 (Principal) ---
+        const sqlFacturas2 = `
+            SELECT ${camposSelect}
+            FROM FACTF02
+            WHERE TIP_DOC = 'F' AND STATUS <> 'C'
+            AND TRIM(CVE_CLPV) <> '4239'
+            AND EXTRACT(MONTH FROM FECHA_DOC) = ?
+            AND EXTRACT(YEAR FROM FECHA_DOC) = ?
+            ORDER BY FECHA_DOC ASC, CVE_DOC ASC`;
+
+        const sqlRemisiones2 = `
+            SELECT ${camposSelect}
+            FROM FACTR02
+            WHERE TIP_DOC = 'R' AND STATUS <> 'C'
+            AND TRIM(CVE_CLPV) <> '4239'
+            AND (COALESCE(TIP_DOC_SIG, '') <> 'F')
+            AND EXTRACT(MONTH FROM FECHA_DOC) = ?
+            AND EXTRACT(YEAR FROM FECHA_DOC) = ?
+            ORDER BY FECHA_DOC ASC, CVE_DOC ASC`;
+
+        // --- QUERIES EMPRESA 03 (Fresnillo + Mazatlán + Zacatecas migradas) ---
+        const sqlFacturas3 = `
+            SELECT ${camposSelect}
+            FROM FACTF03
+            WHERE TIP_DOC = 'F' AND STATUS <> 'C'
+            AND TRIM(CVE_CLPV) <> '2257'
+            AND EXTRACT(MONTH FROM FECHA_DOC) = ?
+            AND EXTRACT(YEAR FROM FECHA_DOC) = ?
+            ORDER BY FECHA_DOC ASC, CVE_DOC ASC`;
+
+        const sqlRemisiones3 = `
+            SELECT ${camposSelect}
+            FROM FACTR03
+            WHERE TIP_DOC = 'R' AND STATUS <> 'C'
+            AND TRIM(CVE_CLPV) <> '2257'
+            AND (COALESCE(TIP_DOC_SIG, '') <> 'F')
+            AND EXTRACT(MONTH FROM FECHA_DOC) = ?
+            AND EXTRACT(YEAR FROM FECHA_DOC) = ?
+            ORDER BY FECHA_DOC ASC, CVE_DOC ASC`;
+
+        const [f2, r2, f3, r3] = await Promise.all([
+            db.query(sqlFacturas2, [mes, anio]),
+            db.query(sqlRemisiones2, [mes, anio]),
+            db3.query(sqlFacturas3, [mes, anio]),
+            db3.query(sqlRemisiones3, [mes, anio])
+        ]);
+
+        const registros = [];
+
+        const formatearRegistro = (row, empresa, tablaOrigen, idSucursalMapeado) => ({
+            empresa,
+            tabla_origen: tablaOrigen,
+            tipo_doc: row.TIP_DOC ? row.TIP_DOC.trim() : '',
+            folio: row.FOLIO,
+            fecha: row.FECHA_DOC,
+            status: row.STATUS ? row.STATUS.trim() : '',
+            cliente: row.CLIENTE,
+            num_alma: row.NUM_ALMA,
+            id_sucursal: parseInt(idSucursalMapeado),
+            sucursal: ALMACENES_MAP[idSucursalMapeado],
+            subtotal_contabilizado: round2(row.CAN_TOT || 0),
+            importe_total: round2(row.IMPORTE || 0),
+            tip_doc_ant: row.TIP_DOC_ANT,
+            doc_ant: row.DOC_ANT,
+            tip_doc_sig: row.TIP_DOC_SIG,
+            doc_sig: row.DOC_SIG
+        });
+
+        // Procesar Empresa 02
+        f2.forEach(row => {
+            const idSuc = String(row.NUM_ALMA);
+            if (ALMACENES_MAP[idSuc]) {
+                registros.push(formatearRegistro(row, 'Empresa 02', 'FACTF02', idSuc));
+            }
+        });
+        r2.forEach(row => {
+            const idSuc = String(row.NUM_ALMA);
+            if (ALMACENES_MAP[idSuc]) {
+                registros.push(formatearRegistro(row, 'Empresa 02', 'FACTR02', idSuc));
+            }
+        });
+
+        // Procesar Empresa 03
+        f3.forEach(row => {
+            const idSuc = String(row.NUM_ALMA) === '3' ? '10' : String(row.NUM_ALMA);
+            if (ALMACENES_MAP[idSuc]) {
+                registros.push(formatearRegistro(row, 'Empresa 03', 'FACTF03', idSuc));
+            }
+        });
+        r3.forEach(row => {
+            const idSuc = String(row.NUM_ALMA) === '3' ? '10' : String(row.NUM_ALMA);
+            if (ALMACENES_MAP[idSuc]) {
+                registros.push(formatearRegistro(row, 'Empresa 03', 'FACTR03', idSuc));
+            }
+        });
+
+        // Filtrar por sucursal si se envió el parámetro ?sucursal=
+        const registrosFiltrados = filtroSucursal
+            ? registros.filter(r =>
+                String(r.id_sucursal) === (filtroSucursal === '3' ? '10' : filtroSucursal) ||
+                r.sucursal.toUpperCase() === filtroSucursal.toUpperCase()
+            )
+            : registros;
+
+        let sumaFacturas = 0;
+        let sumaRemisiones = 0;
+        registrosFiltrados.forEach(r => {
+            if (r.tipo_doc === 'F') sumaFacturas += r.subtotal_contabilizado;
+            if (r.tipo_doc === 'R') sumaRemisiones += r.subtotal_contabilizado;
+        });
+
+        res.json({
+            periodo: { mes, anio },
+            filtro_sucursal: filtroSucursal || 'TODAS',
+            total_registros: registrosFiltrados.length,
+            resumen_contabilizado: {
+                facturas: round2(sumaFacturas),
+                remisiones: round2(sumaRemisiones),
+                total: round2(sumaFacturas + sumaRemisiones)
+            },
+            registros: registrosFiltrados
+        });
+
+    } catch (error) {
+        console.error("Error en Dashboard Ventas Detalle:", error.message);
+        res.status(500).json({ error: "Error al obtener el detalle de ventas", detalle: error.message });
+    }
+});
+
 module.exports = router;
