@@ -404,4 +404,159 @@ router.get('/ventas-detalle', async (req, res) => {
     }
 });
 
+/**
+ * GET /api/dashboard/ventas-detalle-partidas
+ * Descarga a nivel partida (PAR_FACTF / PAR_FACTR) el mismo universo de documentos de /ventas-detalle
+ * Parámetros opcionales: ?mes=10&anio=2026&sucursal=5
+ */
+router.get('/ventas-detalle-partidas', async (req, res) => {
+    const now = new Date();
+    const mes = parseInt(req.query.mes) || (now.getMonth() + 1);
+    const anio = parseInt(req.query.anio) || now.getFullYear();
+    const filtroSucursal = req.query.sucursal ? String(req.query.sucursal).trim() : null;
+
+    try {
+        const buildSqlPartidas = (tablaDoc, tablaPar, tablaInve, tipDoc, clienteExcluido, esRemision) => `
+            SELECT
+                TRIM(D.CVE_DOC) AS FOLIO,
+                D.TIP_DOC,
+                D.FECHA_DOC,
+                D.STATUS,
+                TRIM(D.CVE_CLPV) AS CLIENTE,
+                D.NUM_ALMA,
+                D.CAN_TOT AS SUBTOTAL_DOC,
+                D.IMPORTE AS IMPORTE_DOC,
+                TRIM(COALESCE(D.TIP_DOC_ANT, '')) AS TIP_DOC_ANT,
+                TRIM(COALESCE(D.DOC_ANT, '')) AS DOC_ANT,
+                TRIM(COALESCE(D.TIP_DOC_SIG, '')) AS TIP_DOC_SIG,
+                TRIM(COALESCE(D.DOC_SIG, '')) AS DOC_SIG,
+                P.NUM_PAR,
+                TRIM(P.CVE_ART) AS CVE_ART,
+                TRIM(COALESCE(I.DESCR, '')) AS DESCR,
+                P.CANT,
+                P.PREC,
+                COALESCE(P.DESC1, 0) AS DESC1,
+                COALESCE(P.DESC2, 0) AS DESC2,
+                COALESCE(P.DESC3, 0) AS DESC3,
+                P.TOT_PARTIDA,
+                COALESCE(P.TOTIMP4, 0) AS TOTIMP4
+            FROM ${tablaDoc} D
+            INNER JOIN ${tablaPar} P ON D.CVE_DOC = P.CVE_DOC
+            LEFT JOIN ${tablaInve} I ON P.CVE_ART = I.CVE_ART
+            WHERE D.TIP_DOC = '${tipDoc}' AND D.STATUS <> 'C'
+            AND TRIM(D.CVE_CLPV) <> '${clienteExcluido}'
+            ${esRemision ? "AND (COALESCE(D.TIP_DOC_SIG, '') <> 'F')" : ""}
+            AND EXTRACT(MONTH FROM D.FECHA_DOC) = ?
+            AND EXTRACT(YEAR FROM D.FECHA_DOC) = ?
+            ORDER BY D.FECHA_DOC ASC, D.CVE_DOC ASC, P.NUM_PAR ASC
+        `;
+
+        // --- QUERIES EMPRESA 02 (Principal) ---
+        const sqlFacturas2 = buildSqlPartidas('FACTF02', 'PAR_FACTF02', 'INVE02', 'F', '4239', false);
+        const sqlRemisiones2 = buildSqlPartidas('FACTR02', 'PAR_FACTR02', 'INVE02', 'R', '4239', true);
+
+        // --- QUERIES EMPRESA 03 (Fresnillo + Mazatlán + Zacatecas migradas) ---
+        const sqlFacturas3 = buildSqlPartidas('FACTF03', 'PAR_FACTF03', 'INVE03', 'F', '2257', false);
+        const sqlRemisiones3 = buildSqlPartidas('FACTR03', 'PAR_FACTR03', 'INVE03', 'R', '2257', true);
+
+        const [f2, r2, f3, r3] = await Promise.all([
+            db.query(sqlFacturas2, [mes, anio]),
+            db.query(sqlRemisiones2, [mes, anio]),
+            db3.query(sqlFacturas3, [mes, anio]),
+            db3.query(sqlRemisiones3, [mes, anio])
+        ]);
+
+        const partidas = [];
+
+        const formatearPartida = (row, empresa, tablaDoc, tablaPar, idSucursalMapeado) => ({
+            empresa,
+            tabla_documento: tablaDoc,
+            tabla_partida: tablaPar,
+            tipo_doc: row.TIP_DOC ? row.TIP_DOC.trim() : '',
+            folio: row.FOLIO,
+            fecha: row.FECHA_DOC,
+            status: row.STATUS ? row.STATUS.trim() : '',
+            cliente: row.CLIENTE,
+            num_alma: row.NUM_ALMA,
+            id_sucursal: parseInt(idSucursalMapeado),
+            sucursal: ALMACENES_MAP[idSucursalMapeado],
+            subtotal_documento: round2(row.SUBTOTAL_DOC || 0),
+            importe_documento: round2(row.IMPORTE_DOC || 0),
+            tip_doc_ant: row.TIP_DOC_ANT,
+            doc_ant: row.DOC_ANT,
+            tip_doc_sig: row.TIP_DOC_SIG,
+            doc_sig: row.DOC_SIG,
+            num_par: row.NUM_PAR,
+            cve_art: row.CVE_ART,
+            descripcion: row.DESCR,
+            cantidad: row.CANT || 0,
+            precio_unitario: round2(row.PREC || 0),
+            desc1: row.DESC1 || 0,
+            desc2: row.DESC2 || 0,
+            desc3: row.DESC3 || 0,
+            subtotal_partida: round2(row.TOT_PARTIDA || 0),
+            iva_partida: round2(row.TOTIMP4 || 0)
+        });
+
+        // Procesar Empresa 02
+        f2.forEach(row => {
+            const idSuc = String(row.NUM_ALMA);
+            if (ALMACENES_MAP[idSuc]) {
+                partidas.push(formatearPartida(row, 'Empresa 02', 'FACTF02', 'PAR_FACTF02', idSuc));
+            }
+        });
+        r2.forEach(row => {
+            const idSuc = String(row.NUM_ALMA);
+            if (ALMACENES_MAP[idSuc]) {
+                partidas.push(formatearPartida(row, 'Empresa 02', 'FACTR02', 'PAR_FACTR02', idSuc));
+            }
+        });
+
+        // Procesar Empresa 03
+        f3.forEach(row => {
+            const idSuc = String(row.NUM_ALMA) === '3' ? '10' : String(row.NUM_ALMA);
+            if (ALMACENES_MAP[idSuc]) {
+                partidas.push(formatearPartida(row, 'Empresa 03', 'FACTF03', 'PAR_FACTF03', idSuc));
+            }
+        });
+        r3.forEach(row => {
+            const idSuc = String(row.NUM_ALMA) === '3' ? '10' : String(row.NUM_ALMA);
+            if (ALMACENES_MAP[idSuc]) {
+                partidas.push(formatearPartida(row, 'Empresa 03', 'FACTR03', 'PAR_FACTR03', idSuc));
+            }
+        });
+
+        // Filtrar por sucursal si se envió el parámetro ?sucursal=
+        const partidasFiltradas = filtroSucursal
+            ? partidas.filter(p =>
+                String(p.id_sucursal) === (filtroSucursal === '3' ? '10' : filtroSucursal) ||
+                p.sucursal.toUpperCase() === filtroSucursal.toUpperCase()
+            )
+            : partidas;
+
+        let sumaPartidasFacturas = 0;
+        let sumaPartidasRemisiones = 0;
+        partidasFiltradas.forEach(p => {
+            if (p.tipo_doc === 'F') sumaPartidasFacturas += p.subtotal_partida;
+            if (p.tipo_doc === 'R') sumaPartidasRemisiones += p.subtotal_partida;
+        });
+
+        res.json({
+            periodo: { mes, anio },
+            filtro_sucursal: filtroSucursal || 'TODAS',
+            total_partidas: partidasFiltradas.length,
+            resumen_partidas: {
+                facturas: round2(sumaPartidasFacturas),
+                remisiones: round2(sumaPartidasRemisiones),
+                total: round2(sumaPartidasFacturas + sumaPartidasRemisiones)
+            },
+            partidas: partidasFiltradas
+        });
+
+    } catch (error) {
+        console.error("Error en Dashboard Ventas Detalle Partidas:", error.message);
+        res.status(500).json({ error: "Error al obtener el detalle de partidas de ventas", detalle: error.message });
+    }
+});
+
 module.exports = router;
