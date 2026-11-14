@@ -576,4 +576,251 @@ router.get('/ventas-detalle-partidas', async (req, res) => {
     }
 });
 
+/**
+ * GET /api/dashboard/filtros-catalogo
+ * Filtrado cruzado reactivo (auto-excluyente) para Género (CAMPLIB21), Familia (CAMPLIB24) y Línea (LIN_PROD).
+ * Parámetros opcionales: ?genero=...&familia=...&linea=...
+ */
+router.get('/filtros-catalogo', async (req, res) => {
+    const { genero, familia, linea } = req.query;
+
+    const targetGenero = genero && String(genero).trim().toUpperCase() !== 'TODOS'
+        ? String(genero).trim().toUpperCase()
+        : null;
+    const targetFamilia = familia && String(familia).trim().toUpperCase() !== 'TODOS'
+        ? String(familia).trim().toUpperCase()
+        : null;
+    const targetLinea = linea && String(linea).trim().toUpperCase() !== 'TODOS'
+        ? String(linea).trim().toUpperCase()
+        : null;
+
+    const sql = `
+        SELECT DISTINCT
+            UPPER(TRIM(COALESCE(C.CAMPLIB21, ''))) AS GENERO,
+            UPPER(TRIM(COALESCE(C.CAMPLIB24, ''))) AS FAMILIA,
+            UPPER(TRIM(COALESCE(I.LIN_PROD, ''))) AS LINEA
+        FROM INVE02 I
+        INNER JOIN INVE_CLIB02 C ON I.CVE_ART = C.CVE_PROD
+        WHERE I.STATUS = 'A'
+    `;
+
+    try {
+        const rows = await db.query(sql);
+
+        const cumple = (valRow, valTarget) => {
+            if (!valTarget) return true;
+            if (!valRow) return false;
+            return valRow === valTarget;
+        };
+
+        const setGeneros = new Set();
+        const setFamilias = new Set();
+        const setLineas = new Set();
+
+        rows.forEach(row => {
+            const gen = row.GENERO || null;
+            const fam = row.FAMILIA || null;
+            const lin = row.LINEA || null;
+
+            const matchGen = cumple(gen, targetGenero);
+            const matchFam = cumple(fam, targetFamilia);
+            const matchLin = cumple(lin, targetLinea);
+
+            // Filtrado cruzado auto-excluyente: cada lista ignora su propio filtro para permitir cambiar de opción,
+            // pero se acota inmediatamente por los otros dos filtros activos.
+            if (matchFam && matchLin && gen) setGeneros.add(gen);
+            if (matchGen && matchLin && fam) setFamilias.add(fam);
+            if (matchGen && matchFam && lin) setLineas.add(lin);
+        });
+
+        const ordenarAlfa = (a, b) => a.localeCompare(b);
+
+        res.json({
+            opciones_genero: Array.from(setGeneros).sort(ordenarAlfa),
+            opciones_familia: Array.from(setFamilias).sort(ordenarAlfa),
+            opciones_linea: Array.from(setLineas).sort(ordenarAlfa)
+        });
+
+    } catch (error) {
+        console.error("Error en /api/dashboard/filtros-catalogo:", error.message);
+        res.status(500).json({
+            error: "Error al obtener el catálogo de filtros",
+            detalle: error.message
+        });
+    }
+});
+
+/**
+ * GET /api/dashboard/ventas-partidas-mensual
+ * Serie mensual unificada para las gráficas de Ventas (subtotal) y Partidas (cantidad de partidas).
+ * Parámetros opcionales: ?almacen=&tipo_venta=&genero=&familia=&linea=&mes=&anio=
+ */
+router.get('/ventas-partidas-mensual', async (req, res) => {
+    const now = new Date();
+    const anio = parseInt(req.query.anio) || now.getFullYear();
+
+    const rawMes = req.query.mes;
+    const mesFiltro = (rawMes && String(rawMes).toUpperCase() !== 'TODOS' && parseInt(rawMes) >= 1 && parseInt(rawMes) <= 12)
+        ? parseInt(rawMes)
+        : null;
+
+    const rawAlmacen = req.query.almacen || req.query.sucursal;
+    const filtroAlmacen = (rawAlmacen && String(rawAlmacen).toUpperCase() !== 'TODOS' && String(rawAlmacen).trim() !== '')
+        ? String(rawAlmacen).trim()
+        : null;
+
+    const rawTipoVenta = req.query.tipo_venta || req.query.tipo_cliente;
+    const tipoVenta = (rawTipoVenta && String(rawTipoVenta).toUpperCase() !== 'TODOS' && String(rawTipoVenta).trim() !== '')
+        ? String(rawTipoVenta).trim().toUpperCase()
+        : null;
+
+    const genero = (req.query.genero && String(req.query.genero).toUpperCase() !== 'TODOS' && String(req.query.genero).trim() !== '')
+        ? String(req.query.genero).trim().toUpperCase()
+        : null;
+
+    const familia = (req.query.familia && String(req.query.familia).toUpperCase() !== 'TODOS' && String(req.query.familia).trim() !== '')
+        ? String(req.query.familia).trim().toUpperCase()
+        : null;
+
+    const linea = (req.query.linea && String(req.query.linea).toUpperCase() !== 'TODOS' && String(req.query.linea).trim() !== '')
+        ? String(req.query.linea).trim().toUpperCase()
+        : null;
+
+    try {
+        const buildQuery = (sufijo, tipoDoc, clienteExcluido) => {
+            const tablaDoc = tipoDoc === 'F' ? `FACTF${sufijo}` : `FACTR${sufijo}`;
+            const tablaPar = tipoDoc === 'F' ? `PAR_FACTF${sufijo}` : `PAR_FACTR${sufijo}`;
+            const tablaClie = `CLIE${sufijo}`;
+            const tablaInve = `INVE${sufijo}`;
+            const tablaClib = `INVE_CLIB${sufijo}`;
+
+            const where = [
+                `D.TIP_DOC = '${tipoDoc}'`,
+                `D.STATUS <> 'C'`,
+                `TRIM(D.CVE_CLPV) <> '${clienteExcluido}'`,
+                `UPPER(TRIM(P.CVE_ART)) <> 'ENVIO'`,
+                `EXTRACT(YEAR FROM D.FECHA_DOC) = ?`
+            ];
+            const params = [anio];
+
+            if (tipoDoc === 'R') {
+                where.push(`(COALESCE(D.TIP_DOC_SIG, '') <> 'F')`);
+            }
+
+            if (mesFiltro) {
+                where.push(`EXTRACT(MONTH FROM D.FECHA_DOC) = ?`);
+                params.push(mesFiltro);
+            }
+
+            if (tipoVenta === 'CREDITO' || tipoVenta === 'CRÉDITO' || tipoVenta === 'S') {
+                where.push(`UPPER(TRIM(COALESCE(CL.CON_CREDITO, 'N'))) = 'S'`);
+            } else if (tipoVenta === 'CONTADO' || tipoVenta === 'N') {
+                where.push(`UPPER(TRIM(COALESCE(CL.CON_CREDITO, 'N'))) = 'N'`);
+            }
+
+            if (genero) {
+                where.push(`UPPER(TRIM(COALESCE(L.CAMPLIB21, ''))) = ?`);
+                params.push(genero);
+            }
+
+            if (familia) {
+                where.push(`UPPER(TRIM(COALESCE(L.CAMPLIB24, ''))) = ?`);
+                params.push(familia);
+            }
+
+            if (linea) {
+                where.push(`UPPER(TRIM(COALESCE(I.LIN_PROD, ''))) = ?`);
+                params.push(linea);
+            }
+
+            const sql = `
+                SELECT
+                    EXTRACT(MONTH FROM D.FECHA_DOC) AS MES,
+                    D.NUM_ALMA,
+                    SUM(P.TOT_PARTIDA) AS SUBTOTAL,
+                    COUNT(*) AS PARTIDAS
+                FROM ${tablaDoc} D
+                INNER JOIN ${tablaPar} P ON D.CVE_DOC = P.CVE_DOC
+                LEFT JOIN ${tablaClie} CL ON D.CVE_CLPV = CL.CLAVE
+                LEFT JOIN ${tablaInve} I ON P.CVE_ART = I.CVE_ART
+                LEFT JOIN ${tablaClib} L ON P.CVE_ART = L.CVE_PROD
+                WHERE ${where.join(' AND ')}
+                GROUP BY 1, 2
+                ORDER BY 1
+            `;
+
+            return { sql, params };
+        };
+
+        const qF2 = buildQuery('02', 'F', '4239');
+        const qR2 = buildQuery('02', 'R', '4239');
+        const qF3 = buildQuery('03', 'F', '2257');
+        const qR3 = buildQuery('03', 'R', '2257');
+
+        const [f2, r2, f3, r3] = await Promise.all([
+            db.query(qF2.sql, qF2.params),
+            db.query(qR2.sql, qR2.params),
+            db3.query(qF3.sql, qF3.params),
+            db3.query(qR3.sql, qR3.params)
+        ]);
+
+        const nombresMeses = ["Ene", "Feb", "Mar", "Abr", "May", "Jun", "Jul", "Ago", "Sep", "Oct", "Nov", "Dic"];
+        const anioCorto = String(anio).slice(-2);
+
+        // Inicializar estructura de meses (1..12 o solo el mes filtrado si se especificó)
+        const mesesIndices = mesFiltro ? [mesFiltro] : [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12];
+        const acumuladorMeses = {};
+
+        mesesIndices.forEach(m => {
+            acumuladorMeses[m] = {
+                mes: m,
+                etiqueta: `${nombresMeses[m - 1]} ${anioCorto}`,
+                subtotal: 0,
+                partidas: 0
+            };
+        });
+
+        const pasaFiltroAlmacen = (idSucursalMapeado) => {
+            const nombreSucursal = ALMACENES_MAP[idSucursalMapeado];
+            if (!nombreSucursal) return false;
+            if (!filtroAlmacen) return true;
+
+            const targetId = filtroAlmacen === '3' ? '10' : filtroAlmacen;
+            return (
+                String(idSucursalMapeado) === targetId ||
+                nombreSucursal.toUpperCase() === filtroAlmacen.toUpperCase()
+            );
+        };
+
+        // Acumular resultados de Empresa 02
+        [...f2, ...r2].forEach(row => {
+            const idSuc = String(row.NUM_ALMA);
+            const m = parseInt(row.MES);
+            if (acumuladorMeses[m] && pasaFiltroAlmacen(idSuc)) {
+                acumuladorMeses[m].subtotal = round2(acumuladorMeses[m].subtotal + (row.SUBTOTAL || 0));
+                acumuladorMeses[m].partidas += parseInt(row.PARTIDAS || 0, 10);
+            }
+        });
+
+        // Acumular resultados de Empresa 03 (mapeando almacén 3 -> 10 para Fresnillo)
+        [...f3, ...r3].forEach(row => {
+            const idSuc = String(row.NUM_ALMA) === '3' ? '10' : String(row.NUM_ALMA);
+            const m = parseInt(row.MES);
+            if (acumuladorMeses[m] && pasaFiltroAlmacen(idSuc)) {
+                acumuladorMeses[m].subtotal = round2(acumuladorMeses[m].subtotal + (row.SUBTOTAL || 0));
+                acumuladorMeses[m].partidas += parseInt(row.PARTIDAS || 0, 10);
+            }
+        });
+
+        res.json(mesesIndices.map(m => acumuladorMeses[m]));
+
+    } catch (error) {
+        console.error("Error en /api/dashboard/ventas-partidas-mensual:", error.message);
+        res.status(500).json({
+            error: "Error al calcular la serie mensual de ventas y partidas",
+            detalle: error.message
+        });
+    }
+});
+
 module.exports = router;
