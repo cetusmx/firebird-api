@@ -20,46 +20,66 @@ router.get('/ventas-resumen', async (req, res) => {
 
     try {
         // --- QUERIES EMPRESA 02 (Principal) ---
-        // Usamos TRIM para eliminar espacios y asegurar la exclusión del cliente 4239
+        // Usamos TRIM para eliminar espacios, excluir cliente 4239 y descontar partidas 'ENVIO'
         const sqlFacturas2 = `
-            SELECT NUM_ALMA, SUM(CAN_TOT) as TOTAL 
-            FROM FACTF02 
-            WHERE TIP_DOC = 'F' AND STATUS <> 'C' 
-            AND TRIM(CVE_CLPV) <> '4239'
-            AND EXTRACT(MONTH FROM FECHA_DOC) = ? 
-            AND EXTRACT(YEAR FROM FECHA_DOC) = ?
-            GROUP BY NUM_ALMA`;
+            SELECT F.NUM_ALMA, 
+                   SUM(F.CAN_TOT - COALESCE((
+                       SELECT SUM(P.TOT_PARTIDA) 
+                       FROM PAR_FACTF02 P 
+                       WHERE P.CVE_DOC = F.CVE_DOC AND UPPER(TRIM(P.CVE_ART)) = 'ENVIO'
+                   ), 0)) as TOTAL 
+            FROM FACTF02 F
+            WHERE F.TIP_DOC = 'F' AND F.STATUS <> 'C' 
+            AND TRIM(F.CVE_CLPV) <> '4239'
+            AND EXTRACT(MONTH FROM F.FECHA_DOC) = ? 
+            AND EXTRACT(YEAR FROM F.FECHA_DOC) = ?
+            GROUP BY F.NUM_ALMA`;
 
         const sqlRemisiones2 = `
-            SELECT NUM_ALMA, SUM(CAN_TOT) as TOTAL 
-            FROM FACTR02 
-            WHERE TIP_DOC = 'R' AND STATUS <> 'C' 
-            AND TRIM(CVE_CLPV) <> '4239'
-            AND (COALESCE(TIP_DOC_SIG, '') <> 'F')
-            AND EXTRACT(MONTH FROM FECHA_DOC) = ? 
-            AND EXTRACT(YEAR FROM FECHA_DOC) = ?
-            GROUP BY NUM_ALMA`;
+            SELECT R.NUM_ALMA, 
+                   SUM(R.CAN_TOT - COALESCE((
+                       SELECT SUM(P.TOT_PARTIDA) 
+                       FROM PAR_FACTR02 P 
+                       WHERE P.CVE_DOC = R.CVE_DOC AND UPPER(TRIM(P.CVE_ART)) = 'ENVIO'
+                   ), 0)) as TOTAL 
+            FROM FACTR02 R
+            WHERE R.TIP_DOC = 'R' AND R.STATUS <> 'C' 
+            AND TRIM(R.CVE_CLPV) <> '4239'
+            AND (COALESCE(R.TIP_DOC_SIG, '') <> 'F')
+            AND EXTRACT(MONTH FROM R.FECHA_DOC) = ? 
+            AND EXTRACT(YEAR FROM R.FECHA_DOC) = ?
+            GROUP BY R.NUM_ALMA`;
 
         // --- QUERIES EMPRESA 03 (Fresnillo + Mazatlán + Zacatecas migradas) ---
-        // Usamos TRIM para asegurar la exclusión del cliente 2257
+        // Usamos TRIM para asegurar la exclusión del cliente 2257 y descontar partidas 'ENVIO'
         const sqlFacturas3 = `
-            SELECT NUM_ALMA, SUM(CAN_TOT) as TOTAL 
-            FROM FACTF03 
-            WHERE TIP_DOC = 'F' AND STATUS <> 'C' 
-            AND TRIM(CVE_CLPV) <> '2257'
-            AND EXTRACT(MONTH FROM FECHA_DOC) = ? 
-            AND EXTRACT(YEAR FROM FECHA_DOC) = ?
-            GROUP BY NUM_ALMA`;
+            SELECT F.NUM_ALMA, 
+                   SUM(F.CAN_TOT - COALESCE((
+                       SELECT SUM(P.TOT_PARTIDA) 
+                       FROM PAR_FACTF03 P 
+                       WHERE P.CVE_DOC = F.CVE_DOC AND UPPER(TRIM(P.CVE_ART)) = 'ENVIO'
+                   ), 0)) as TOTAL 
+            FROM FACTF03 F
+            WHERE F.TIP_DOC = 'F' AND F.STATUS <> 'C' 
+            AND TRIM(F.CVE_CLPV) <> '2257'
+            AND EXTRACT(MONTH FROM F.FECHA_DOC) = ? 
+            AND EXTRACT(YEAR FROM F.FECHA_DOC) = ?
+            GROUP BY F.NUM_ALMA`;
 
         const sqlRemisiones3 = `
-            SELECT NUM_ALMA, SUM(CAN_TOT) as TOTAL 
-            FROM FACTR03 
-            WHERE TIP_DOC = 'R' AND STATUS <> 'C' 
-            AND TRIM(CVE_CLPV) <> '2257'
-            AND (COALESCE(TIP_DOC_SIG, '') <> 'F')
-            AND EXTRACT(MONTH FROM FECHA_DOC) = ? 
-            AND EXTRACT(YEAR FROM FECHA_DOC) = ?
-            GROUP BY NUM_ALMA`;
+            SELECT R.NUM_ALMA, 
+                   SUM(R.CAN_TOT - COALESCE((
+                       SELECT SUM(P.TOT_PARTIDA) 
+                       FROM PAR_FACTR03 P 
+                       WHERE P.CVE_DOC = R.CVE_DOC AND UPPER(TRIM(P.CVE_ART)) = 'ENVIO'
+                   ), 0)) as TOTAL 
+            FROM FACTR03 R
+            WHERE R.TIP_DOC = 'R' AND R.STATUS <> 'C' 
+            AND TRIM(R.CVE_CLPV) <> '2257'
+            AND (COALESCE(R.TIP_DOC_SIG, '') <> 'F')
+            AND EXTRACT(MONTH FROM R.FECHA_DOC) = ? 
+            AND EXTRACT(YEAR FROM R.FECHA_DOC) = ?
+            GROUP BY R.NUM_ALMA`;
 
         const [f2, r2, f3, r3] = await Promise.all([
             db.query(sqlFacturas2, [mes, anio]),
@@ -156,31 +176,39 @@ router.get('/ventas-tendencia', async (req, res) => {
     }
 
     try {
-        // Query base para Empresa 2 (Principal)
+        // Query base para Empresa 2 (Principal) descontando partidas 'ENVIO'
         const sqlBase2 = (tabla) => `
             SELECT 
-                EXTRACT(YEAR FROM FECHA_DOC) as ANIO,
-                EXTRACT(MONTH FROM FECHA_DOC) as MES,
-                NUM_ALMA,
-                SUM(CAN_TOT) as TOTAL
-            FROM ${tabla}
-            WHERE STATUS <> 'C' AND TRIM(CVE_CLPV) <> '4239'
-            AND FECHA_DOC BETWEEN '${fechaInicio}' AND '${fechaFin}'
-            ${tabla.includes('FACTR') ? "AND (COALESCE(TIP_DOC_SIG, '') <> 'F')" : ""}
+                EXTRACT(YEAR FROM D.FECHA_DOC) as ANIO,
+                EXTRACT(MONTH FROM D.FECHA_DOC) as MES,
+                D.NUM_ALMA,
+                SUM(D.CAN_TOT - COALESCE((
+                    SELECT SUM(P.TOT_PARTIDA) 
+                    FROM PAR_${tabla} P 
+                    WHERE P.CVE_DOC = D.CVE_DOC AND UPPER(TRIM(P.CVE_ART)) = 'ENVIO'
+                ), 0)) as TOTAL
+            FROM ${tabla} D
+            WHERE D.STATUS <> 'C' AND TRIM(D.CVE_CLPV) <> '4239'
+            AND D.FECHA_DOC BETWEEN '${fechaInicio}' AND '${fechaFin}'
+            ${tabla.includes('FACTR') ? "AND (COALESCE(D.TIP_DOC_SIG, '') <> 'F')" : ""}
             GROUP BY 1, 2, 3
             ORDER BY 1, 2`;
 
-        // Query base para Empresa 3 (Fresnillo + Mazatlán + Zacatecas migradas)
+        // Query base para Empresa 3 (Fresnillo + Mazatlán + Zacatecas migradas) descontando partidas 'ENVIO'
         const sqlBase3 = (tabla) => `
             SELECT 
-                EXTRACT(YEAR FROM FECHA_DOC) as ANIO,
-                EXTRACT(MONTH FROM FECHA_DOC) as MES,
-                NUM_ALMA,
-                SUM(CAN_TOT) as TOTAL
-            FROM ${tabla}
-            WHERE STATUS <> 'C' AND TRIM(CVE_CLPV) <> '2257'
-            AND FECHA_DOC BETWEEN '${fechaInicio}' AND '${fechaFin}'
-            ${tabla.includes('FACTR') ? "AND (COALESCE(TIP_DOC_SIG, '') <> 'F')" : ""}
+                EXTRACT(YEAR FROM D.FECHA_DOC) as ANIO,
+                EXTRACT(MONTH FROM D.FECHA_DOC) as MES,
+                D.NUM_ALMA,
+                SUM(D.CAN_TOT - COALESCE((
+                    SELECT SUM(P.TOT_PARTIDA) 
+                    FROM PAR_${tabla} P 
+                    WHERE P.CVE_DOC = D.CVE_DOC AND UPPER(TRIM(P.CVE_ART)) = 'ENVIO'
+                ), 0)) as TOTAL
+            FROM ${tabla} D
+            WHERE D.STATUS <> 'C' AND TRIM(D.CVE_CLPV) <> '2257'
+            AND D.FECHA_DOC BETWEEN '${fechaInicio}' AND '${fechaFin}'
+            ${tabla.includes('FACTR') ? "AND (COALESCE(D.TIP_DOC_SIG, '') <> 'F')" : ""}
             GROUP BY 1, 2, 3
             ORDER BY 1, 2`;
 
@@ -260,60 +288,41 @@ router.get('/ventas-detalle', async (req, res) => {
     const filtroSucursal = req.query.sucursal ? String(req.query.sucursal).trim() : null;
 
     try {
-        const camposSelect = `
-            TRIM(CVE_DOC) AS FOLIO,
-            TIP_DOC,
-            FECHA_DOC,
-            STATUS,
-            TRIM(CVE_CLPV) AS CLIENTE,
-            NUM_ALMA,
-            CAN_TOT,
-            IMPORTE,
-            TRIM(COALESCE(TIP_DOC_ANT, '')) AS TIP_DOC_ANT,
-            TRIM(COALESCE(DOC_ANT, '')) AS DOC_ANT,
-            TRIM(COALESCE(TIP_DOC_SIG, '')) AS TIP_DOC_SIG,
-            TRIM(COALESCE(DOC_SIG, '')) AS DOC_SIG
+        const buildSqlDetalle = (tablaDoc, tablaPar, tipDoc, clienteExcluido, esRemision) => `
+            SELECT
+                TRIM(D.CVE_DOC) AS FOLIO,
+                D.TIP_DOC,
+                D.FECHA_DOC,
+                D.STATUS,
+                TRIM(D.CVE_CLPV) AS CLIENTE,
+                D.NUM_ALMA,
+                D.CAN_TOT,
+                COALESCE((
+                    SELECT SUM(P.TOT_PARTIDA)
+                    FROM ${tablaPar} P
+                    WHERE P.CVE_DOC = D.CVE_DOC AND UPPER(TRIM(P.CVE_ART)) = 'ENVIO'
+                ), 0) AS MONTO_ENVIO,
+                D.IMPORTE,
+                TRIM(COALESCE(D.TIP_DOC_ANT, '')) AS TIP_DOC_ANT,
+                TRIM(COALESCE(D.DOC_ANT, '')) AS DOC_ANT,
+                TRIM(COALESCE(D.TIP_DOC_SIG, '')) AS TIP_DOC_SIG,
+                TRIM(COALESCE(D.DOC_SIG, '')) AS DOC_SIG
+            FROM ${tablaDoc} D
+            WHERE D.TIP_DOC = '${tipDoc}' AND D.STATUS <> 'C'
+            AND TRIM(D.CVE_CLPV) <> '${clienteExcluido}'
+            ${esRemision ? "AND (COALESCE(D.TIP_DOC_SIG, '') <> 'F')" : ""}
+            AND EXTRACT(MONTH FROM D.FECHA_DOC) = ?
+            AND EXTRACT(YEAR FROM D.FECHA_DOC) = ?
+            ORDER BY D.FECHA_DOC ASC, D.CVE_DOC ASC
         `;
 
         // --- QUERIES EMPRESA 02 (Principal) ---
-        const sqlFacturas2 = `
-            SELECT ${camposSelect}
-            FROM FACTF02
-            WHERE TIP_DOC = 'F' AND STATUS <> 'C'
-            AND TRIM(CVE_CLPV) <> '4239'
-            AND EXTRACT(MONTH FROM FECHA_DOC) = ?
-            AND EXTRACT(YEAR FROM FECHA_DOC) = ?
-            ORDER BY FECHA_DOC ASC, CVE_DOC ASC`;
-
-        const sqlRemisiones2 = `
-            SELECT ${camposSelect}
-            FROM FACTR02
-            WHERE TIP_DOC = 'R' AND STATUS <> 'C'
-            AND TRIM(CVE_CLPV) <> '4239'
-            AND (COALESCE(TIP_DOC_SIG, '') <> 'F')
-            AND EXTRACT(MONTH FROM FECHA_DOC) = ?
-            AND EXTRACT(YEAR FROM FECHA_DOC) = ?
-            ORDER BY FECHA_DOC ASC, CVE_DOC ASC`;
+        const sqlFacturas2 = buildSqlDetalle('FACTF02', 'PAR_FACTF02', 'F', '4239', false);
+        const sqlRemisiones2 = buildSqlDetalle('FACTR02', 'PAR_FACTR02', 'R', '4239', true);
 
         // --- QUERIES EMPRESA 03 (Fresnillo + Mazatlán + Zacatecas migradas) ---
-        const sqlFacturas3 = `
-            SELECT ${camposSelect}
-            FROM FACTF03
-            WHERE TIP_DOC = 'F' AND STATUS <> 'C'
-            AND TRIM(CVE_CLPV) <> '2257'
-            AND EXTRACT(MONTH FROM FECHA_DOC) = ?
-            AND EXTRACT(YEAR FROM FECHA_DOC) = ?
-            ORDER BY FECHA_DOC ASC, CVE_DOC ASC`;
-
-        const sqlRemisiones3 = `
-            SELECT ${camposSelect}
-            FROM FACTR03
-            WHERE TIP_DOC = 'R' AND STATUS <> 'C'
-            AND TRIM(CVE_CLPV) <> '2257'
-            AND (COALESCE(TIP_DOC_SIG, '') <> 'F')
-            AND EXTRACT(MONTH FROM FECHA_DOC) = ?
-            AND EXTRACT(YEAR FROM FECHA_DOC) = ?
-            ORDER BY FECHA_DOC ASC, CVE_DOC ASC`;
+        const sqlFacturas3 = buildSqlDetalle('FACTF03', 'PAR_FACTF03', 'F', '2257', false);
+        const sqlRemisiones3 = buildSqlDetalle('FACTR03', 'PAR_FACTR03', 'R', '2257', true);
 
         const [f2, r2, f3, r3] = await Promise.all([
             db.query(sqlFacturas2, [mes, anio]),
@@ -324,24 +333,30 @@ router.get('/ventas-detalle', async (req, res) => {
 
         const registros = [];
 
-        const formatearRegistro = (row, empresa, tablaOrigen, idSucursalMapeado) => ({
-            empresa,
-            tabla_origen: tablaOrigen,
-            tipo_doc: row.TIP_DOC ? row.TIP_DOC.trim() : '',
-            folio: row.FOLIO,
-            fecha: row.FECHA_DOC,
-            status: row.STATUS ? row.STATUS.trim() : '',
-            cliente: row.CLIENTE,
-            num_alma: row.NUM_ALMA,
-            id_sucursal: parseInt(idSucursalMapeado),
-            sucursal: ALMACENES_MAP[idSucursalMapeado],
-            subtotal_contabilizado: round2(row.CAN_TOT || 0),
-            importe_total: round2(row.IMPORTE || 0),
-            tip_doc_ant: row.TIP_DOC_ANT,
-            doc_ant: row.DOC_ANT,
-            tip_doc_sig: row.TIP_DOC_SIG,
-            doc_sig: row.DOC_SIG
-        });
+        const formatearRegistro = (row, empresa, tablaOrigen, idSucursalMapeado) => {
+            const canTot = row.CAN_TOT || 0;
+            const montoEnvio = row.MONTO_ENVIO || 0;
+            return {
+                empresa,
+                tabla_origen: tablaOrigen,
+                tipo_doc: row.TIP_DOC ? row.TIP_DOC.trim() : '',
+                folio: row.FOLIO,
+                fecha: row.FECHA_DOC,
+                status: row.STATUS ? row.STATUS.trim() : '',
+                cliente: row.CLIENTE,
+                num_alma: row.NUM_ALMA,
+                id_sucursal: parseInt(idSucursalMapeado),
+                sucursal: ALMACENES_MAP[idSucursalMapeado],
+                subtotal_original_doc: round2(canTot),
+                monto_envio_descontado: round2(montoEnvio),
+                subtotal_contabilizado: round2(canTot - montoEnvio),
+                importe_total: round2(row.IMPORTE || 0),
+                tip_doc_ant: row.TIP_DOC_ANT,
+                doc_ant: row.DOC_ANT,
+                tip_doc_sig: row.TIP_DOC_SIG,
+                doc_sig: row.DOC_SIG
+            };
+        };
 
         // Procesar Empresa 02
         f2.forEach(row => {
@@ -445,6 +460,7 @@ router.get('/ventas-detalle-partidas', async (req, res) => {
             LEFT JOIN ${tablaInve} I ON P.CVE_ART = I.CVE_ART
             WHERE D.TIP_DOC = '${tipDoc}' AND D.STATUS <> 'C'
             AND TRIM(D.CVE_CLPV) <> '${clienteExcluido}'
+            AND UPPER(TRIM(P.CVE_ART)) <> 'ENVIO'
             ${esRemision ? "AND (COALESCE(D.TIP_DOC_SIG, '') <> 'F')" : ""}
             AND EXTRACT(MONTH FROM D.FECHA_DOC) = ?
             AND EXTRACT(YEAR FROM D.FECHA_DOC) = ?
