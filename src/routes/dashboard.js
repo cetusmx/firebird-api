@@ -686,13 +686,41 @@ router.get('/ventas-partidas-mensual', async (req, res) => {
         ? String(req.query.linea).trim().toUpperCase()
         : null;
 
+    const hayFiltroProducto = Boolean(genero || familia || linea);
+
     try {
-        const buildQuery = (sufijo, tipoDoc, clienteExcluido) => {
-            const tablaDoc = tipoDoc === 'F' ? `FACTF${sufijo}` : `FACTR${sufijo}`;
-            const tablaPar = tipoDoc === 'F' ? `PAR_FACTF${sufijo}` : `PAR_FACTR${sufijo}`;
-            const tablaClie = `CLIE${sufijo}`;
-            const tablaInve = `INVE${sufijo}`;
-            const tablaClib = `INVE_CLIB${sufijo}`;
+        // Catálogo Maestro Único (INVE02 + INVE_CLIB02 en db):
+        // Si hay filtro de género, familia o línea, obtenemos el Set de claves válidas del catálogo maestro (Empresa 02)
+        // para filtrar con exactitud las ventas de Empresa 03 (db3) sin depender de INVE03 / INVE_CLIB03.
+        const buildCatalogoMaestroQuery = () => {
+            const whereCat = [`I.STATUS = 'A'`];
+            const paramsCat = [];
+
+            if (genero) {
+                whereCat.push(`UPPER(TRIM(COALESCE(L.CAMPLIB21, ''))) = ?`);
+                paramsCat.push(genero);
+            }
+            if (familia) {
+                whereCat.push(`UPPER(TRIM(COALESCE(L.CAMPLIB24, ''))) = ?`);
+                paramsCat.push(familia);
+            }
+            if (linea) {
+                whereCat.push(`UPPER(TRIM(COALESCE(I.LIN_PROD, ''))) = ?`);
+                paramsCat.push(linea);
+            }
+
+            const sqlCat = `
+                SELECT TRIM(I.CVE_ART) AS CVE_ART
+                FROM INVE02 I
+                LEFT JOIN INVE_CLIB02 L ON I.CVE_ART = L.CVE_PROD
+                WHERE ${whereCat.join(' AND ')}
+            `;
+            return { sql: sqlCat, params: paramsCat };
+        };
+
+        const buildQueryEmp2 = (tipoDoc, clienteExcluido) => {
+            const tablaDoc = tipoDoc === 'F' ? 'FACTF02' : 'FACTR02';
+            const tablaPar = tipoDoc === 'F' ? 'PAR_FACTF02' : 'PAR_FACTR02';
 
             const where = [
                 `D.TIP_DOC = '${tipoDoc}'`,
@@ -741,9 +769,9 @@ router.get('/ventas-partidas-mensual', async (req, res) => {
                     COUNT(*) AS PARTIDAS
                 FROM ${tablaDoc} D
                 INNER JOIN ${tablaPar} P ON D.CVE_DOC = P.CVE_DOC
-                LEFT JOIN ${tablaClie} CL ON D.CVE_CLPV = CL.CLAVE
-                LEFT JOIN ${tablaInve} I ON P.CVE_ART = I.CVE_ART
-                LEFT JOIN ${tablaClib} L ON P.CVE_ART = L.CVE_PROD
+                LEFT JOIN CLIE02 CL ON D.CVE_CLPV = CL.CLAVE
+                LEFT JOIN INVE02 I ON P.CVE_ART = I.CVE_ART
+                LEFT JOIN INVE_CLIB02 L ON P.CVE_ART = L.CVE_PROD
                 WHERE ${where.join(' AND ')}
                 GROUP BY 1, 2
                 ORDER BY 1
@@ -752,17 +780,72 @@ router.get('/ventas-partidas-mensual', async (req, res) => {
             return { sql, params };
         };
 
-        const qF2 = buildQuery('02', 'F', '4239');
-        const qR2 = buildQuery('02', 'R', '4239');
-        const qF3 = buildQuery('03', 'F', '2257');
-        const qR3 = buildQuery('03', 'R', '2257');
+        const buildQueryEmp3 = (tipoDoc, clienteExcluido) => {
+            const tablaDoc = tipoDoc === 'F' ? 'FACTF03' : 'FACTR03';
+            const tablaPar = tipoDoc === 'F' ? 'PAR_FACTF03' : 'PAR_FACTR03';
 
-        const [f2, r2, f3, r3] = await Promise.all([
+            const where = [
+                `D.TIP_DOC = '${tipoDoc}'`,
+                `D.STATUS <> 'C'`,
+                `TRIM(D.CVE_CLPV) <> '${clienteExcluido}'`,
+                `UPPER(TRIM(P.CVE_ART)) <> 'ENVIO'`,
+                `EXTRACT(YEAR FROM D.FECHA_DOC) = ?`
+            ];
+            const params = [anio];
+
+            if (tipoDoc === 'R') {
+                where.push(`(COALESCE(D.TIP_DOC_SIG, '') <> 'F')`);
+            }
+
+            if (mesFiltro) {
+                where.push(`EXTRACT(MONTH FROM D.FECHA_DOC) = ?`);
+                params.push(mesFiltro);
+            }
+
+            if (tipoVenta === 'CREDITO' || tipoVenta === 'CRÉDITO' || tipoVenta === 'S') {
+                where.push(`UPPER(TRIM(COALESCE(CL.CON_CREDITO, 'N'))) = 'S'`);
+            } else if (tipoVenta === 'CONTADO' || tipoVenta === 'N') {
+                where.push(`UPPER(TRIM(COALESCE(CL.CON_CREDITO, 'N'))) = 'N'`);
+            }
+
+            // Si hay filtro de producto, agrupamos también por CVE_ART para cruzar contra el Catálogo Maestro (INVE02 + INVE_CLIB02)
+            const selectArt = hayFiltroProducto ? `, TRIM(P.CVE_ART) AS CVE_ART` : '';
+            const groupBy = hayFiltroProducto ? `GROUP BY 1, 2, 3` : `GROUP BY 1, 2`;
+
+            const sql = `
+                SELECT
+                    EXTRACT(MONTH FROM D.FECHA_DOC) AS MES,
+                    D.NUM_ALMA${selectArt},
+                    SUM(P.TOT_PARTIDA) AS SUBTOTAL,
+                    COUNT(*) AS PARTIDAS
+                FROM ${tablaDoc} D
+                INNER JOIN ${tablaPar} P ON D.CVE_DOC = P.CVE_DOC
+                LEFT JOIN CLIE03 CL ON D.CVE_CLPV = CL.CLAVE
+                WHERE ${where.join(' AND ')}
+                ${groupBy}
+                ORDER BY 1
+            `;
+
+            return { sql, params };
+        };
+
+        const qF2 = buildQueryEmp2('F', '4239');
+        const qR2 = buildQueryEmp2('R', '4239');
+        const qF3 = buildQueryEmp3('F', '2257');
+        const qR3 = buildQueryEmp3('R', '2257');
+        const qCat = hayFiltroProducto ? buildCatalogoMaestroQuery() : null;
+
+        const [f2, r2, f3, r3, catRows] = await Promise.all([
             db.query(qF2.sql, qF2.params),
             db.query(qR2.sql, qR2.params),
             db3.query(qF3.sql, qF3.params),
-            db3.query(qR3.sql, qR3.params)
+            db3.query(qR3.sql, qR3.params),
+            qCat ? db.query(qCat.sql, qCat.params) : Promise.resolve([])
         ]);
+
+        const setClavesMaestro = hayFiltroProducto
+            ? new Set(catRows.map(r => r.CVE_ART))
+            : null;
 
         const nombresMeses = ["Ene", "Feb", "Mar", "Abr", "May", "Jun", "Jul", "Ago", "Sep", "Oct", "Nov", "Dic"];
         const anioCorto = String(anio).slice(-2);
@@ -802,11 +885,12 @@ router.get('/ventas-partidas-mensual', async (req, res) => {
             }
         });
 
-        // Acumular resultados de Empresa 03 (mapeando almacén 3 -> 10 para Fresnillo)
+        // Acumular resultados de Empresa 03 (mapeando almacén 3 -> 10 para Fresnillo y validando contra el Catálogo Maestro si hay filtro de producto)
         [...f3, ...r3].forEach(row => {
             const idSuc = String(row.NUM_ALMA) === '3' ? '10' : String(row.NUM_ALMA);
             const m = parseInt(row.MES);
-            if (acumuladorMeses[m] && pasaFiltroAlmacen(idSuc)) {
+            const pasaCatalogoMaestro = !setClavesMaestro || setClavesMaestro.has(row.CVE_ART);
+            if (acumuladorMeses[m] && pasaFiltroAlmacen(idSuc) && pasaCatalogoMaestro) {
                 acumuladorMeses[m].subtotal = round2(acumuladorMeses[m].subtotal + (row.SUBTOTAL || 0));
                 acumuladorMeses[m].partidas += parseInt(row.PARTIDAS || 0, 10);
             }
