@@ -81,9 +81,12 @@ router.get('/ventas-resumen', async (req, res) => {
             AND EXTRACT(YEAR FROM R.FECHA_DOC) = ?
             GROUP BY R.NUM_ALMA`;
 
-        const [f2, r2, f3, r3] = await Promise.all([
+        // Ejecución escalonada (primero Empresa 02, luego Empresa 03) para evitar saturar el puerto 3050 de Firebird
+        const [f2, r2] = await Promise.all([
             db.query(sqlFacturas2, [mes, anio]),
-            db.query(sqlRemisiones2, [mes, anio]),
+            db.query(sqlRemisiones2, [mes, anio])
+        ]);
+        const [f3, r3] = await Promise.all([
             db3.query(sqlFacturas3, [mes, anio]),
             db3.query(sqlRemisiones3, [mes, anio])
         ]);
@@ -212,10 +215,12 @@ router.get('/ventas-tendencia', async (req, res) => {
             GROUP BY 1, 2, 3
             ORDER BY 1, 2`;
 
-        // Ejecución en paralelo
-        const [f2, r2, f3, r3] = await Promise.all([
+        // Ejecución escalonada (primero Empresa 02, luego Empresa 03)
+        const [f2, r2] = await Promise.all([
             db.query(sqlBase2('FACTF02')),
-            db.query(sqlBase2('FACTR02')),
+            db.query(sqlBase2('FACTR02'))
+        ]);
+        const [f3, r3] = await Promise.all([
             db3.query(sqlBase3('FACTF03')),
             db3.query(sqlBase3('FACTR03'))
         ]);
@@ -324,9 +329,12 @@ router.get('/ventas-detalle', async (req, res) => {
         const sqlFacturas3 = buildSqlDetalle('FACTF03', 'PAR_FACTF03', 'F', '2257', false);
         const sqlRemisiones3 = buildSqlDetalle('FACTR03', 'PAR_FACTR03', 'R', '2257', true);
 
-        const [f2, r2, f3, r3] = await Promise.all([
+        // Ejecución escalonada (primero Empresa 02, luego Empresa 03) para evitar saturar el puerto 3050 de Firebird
+        const [f2, r2] = await Promise.all([
             db.query(sqlFacturas2, [mes, anio]),
-            db.query(sqlRemisiones2, [mes, anio]),
+            db.query(sqlRemisiones2, [mes, anio])
+        ]);
+        const [f3, r3] = await Promise.all([
             db3.query(sqlFacturas3, [mes, anio]),
             db3.query(sqlRemisiones3, [mes, anio])
         ]);
@@ -475,9 +483,12 @@ router.get('/ventas-detalle-partidas', async (req, res) => {
         const sqlFacturas3 = buildSqlPartidas('FACTF03', 'PAR_FACTF03', 'INVE03', 'F', '2257', false);
         const sqlRemisiones3 = buildSqlPartidas('FACTR03', 'PAR_FACTR03', 'INVE03', 'R', '2257', true);
 
-        const [f2, r2, f3, r3] = await Promise.all([
+        // Ejecución escalonada (primero Empresa 02, luego Empresa 03) para evitar saturar el puerto 3050 de Firebird
+        const [f2, r2] = await Promise.all([
             db.query(sqlFacturas2, [mes, anio]),
-            db.query(sqlRemisiones2, [mes, anio]),
+            db.query(sqlRemisiones2, [mes, anio])
+        ]);
+        const [f3, r3] = await Promise.all([
             db3.query(sqlFacturas3, [mes, anio]),
             db3.query(sqlRemisiones3, [mes, anio])
         ]);
@@ -576,6 +587,50 @@ router.get('/ventas-detalle-partidas', async (req, res) => {
     }
 });
 
+// =========================================================================
+// CACHÉ EN MEMORIA DEL CATÁLOGO MAESTRO (INVE02 + INVE_CLIB02) - TTL 5 MIN
+// =========================================================================
+const CATALOGO_TTL_MS = 5 * 60 * 1000;
+let catalogoMaestroCache = null;
+let catalogoMaestroTimestamp = 0;
+let catalogoMaestroPromise = null;
+
+async function obtenerCatalogoMaestroCacheado() {
+    const ahora = Date.now();
+    if (catalogoMaestroCache && (ahora - catalogoMaestroTimestamp) < CATALOGO_TTL_MS) {
+        return catalogoMaestroCache;
+    }
+
+    if (catalogoMaestroPromise) {
+        return catalogoMaestroPromise;
+    }
+
+    const sql = `
+        SELECT
+            TRIM(I.CVE_ART) AS CVE_ART,
+            UPPER(TRIM(COALESCE(C.CAMPLIB21, ''))) AS GENERO,
+            UPPER(TRIM(COALESCE(C.CAMPLIB24, ''))) AS FAMILIA,
+            UPPER(TRIM(COALESCE(I.LIN_PROD, ''))) AS LINEA
+        FROM INVE02 I
+        LEFT JOIN INVE_CLIB02 C ON I.CVE_ART = C.CVE_PROD
+        WHERE I.STATUS = 'A'
+    `;
+
+    catalogoMaestroPromise = db.query(sql)
+        .then(rows => {
+            catalogoMaestroCache = rows;
+            catalogoMaestroTimestamp = Date.now();
+            catalogoMaestroPromise = null;
+            return rows;
+        })
+        .catch(err => {
+            catalogoMaestroPromise = null;
+            throw err;
+        });
+
+    return catalogoMaestroPromise;
+}
+
 /**
  * GET /api/dashboard/filtros-catalogo
  * Filtrado cruzado reactivo (auto-excluyente) para Género (CAMPLIB21), Familia (CAMPLIB24) y Línea (LIN_PROD).
@@ -594,18 +649,8 @@ router.get('/filtros-catalogo', async (req, res) => {
         ? String(linea).trim().toUpperCase()
         : null;
 
-    const sql = `
-        SELECT DISTINCT
-            UPPER(TRIM(COALESCE(C.CAMPLIB21, ''))) AS GENERO,
-            UPPER(TRIM(COALESCE(C.CAMPLIB24, ''))) AS FAMILIA,
-            UPPER(TRIM(COALESCE(I.LIN_PROD, ''))) AS LINEA
-        FROM INVE02 I
-        INNER JOIN INVE_CLIB02 C ON I.CVE_ART = C.CVE_PROD
-        WHERE I.STATUS = 'A'
-    `;
-
     try {
-        const rows = await db.query(sql);
+        const rows = await obtenerCatalogoMaestroCacheado();
 
         const cumple = (valRow, valTarget) => {
             if (!valTarget) return true;
@@ -688,36 +733,11 @@ router.get('/ventas-partidas-mensual', async (req, res) => {
 
     const hayFiltroProducto = Boolean(genero || familia || linea);
 
+    // Determinar si el almacén seleccionado es exclusivo de Empresa 02 (Durango = 1, Querétaro = 7)
+    const almUpper = filtroAlmacen ? filtroAlmacen.toUpperCase() : '';
+    const esSoloEmpresa02 = almUpper === '1' || almUpper === '7' || almUpper === 'DURANGO' || almUpper === 'QUERÉTARO' || almUpper === 'QUERETARO';
+
     try {
-        // Catálogo Maestro Único (INVE02 + INVE_CLIB02 en db):
-        // Si hay filtro de género, familia o línea, obtenemos el Set de claves válidas del catálogo maestro (Empresa 02)
-        // para filtrar con exactitud las ventas de Empresa 03 (db3) sin depender de INVE03 / INVE_CLIB03.
-        const buildCatalogoMaestroQuery = () => {
-            const whereCat = [`I.STATUS = 'A'`];
-            const paramsCat = [];
-
-            if (genero) {
-                whereCat.push(`UPPER(TRIM(COALESCE(L.CAMPLIB21, ''))) = ?`);
-                paramsCat.push(genero);
-            }
-            if (familia) {
-                whereCat.push(`UPPER(TRIM(COALESCE(L.CAMPLIB24, ''))) = ?`);
-                paramsCat.push(familia);
-            }
-            if (linea) {
-                whereCat.push(`UPPER(TRIM(COALESCE(I.LIN_PROD, ''))) = ?`);
-                paramsCat.push(linea);
-            }
-
-            const sqlCat = `
-                SELECT TRIM(I.CVE_ART) AS CVE_ART
-                FROM INVE02 I
-                LEFT JOIN INVE_CLIB02 L ON I.CVE_ART = L.CVE_PROD
-                WHERE ${whereCat.join(' AND ')}
-            `;
-            return { sql: sqlCat, params: paramsCat };
-        };
-
         const buildQueryEmp2 = (tipoDoc, clienteExcluido) => {
             const tablaDoc = tipoDoc === 'F' ? 'FACTF02' : 'FACTR02';
             const tablaPar = tipoDoc === 'F' ? 'PAR_FACTF02' : 'PAR_FACTR02';
@@ -808,7 +828,7 @@ router.get('/ventas-partidas-mensual', async (req, res) => {
                 where.push(`UPPER(TRIM(COALESCE(CL.CON_CREDITO, 'N'))) = 'N'`);
             }
 
-            // Si hay filtro de producto, agrupamos también por CVE_ART para cruzar contra el Catálogo Maestro (INVE02 + INVE_CLIB02)
+            // Si hay filtro de producto, agrupamos también por CVE_ART para cruzar contra el Catálogo Maestro cacheado
             const selectArt = hayFiltroProducto ? `, TRIM(P.CVE_ART) AS CVE_ART` : '';
             const groupBy = hayFiltroProducto ? `GROUP BY 1, 2, 3` : `GROUP BY 1, 2`;
 
@@ -831,21 +851,37 @@ router.get('/ventas-partidas-mensual', async (req, res) => {
 
         const qF2 = buildQueryEmp2('F', '4239');
         const qR2 = buildQueryEmp2('R', '4239');
-        const qF3 = buildQueryEmp3('F', '2257');
-        const qR3 = buildQueryEmp3('R', '2257');
-        const qCat = hayFiltroProducto ? buildCatalogoMaestroQuery() : null;
 
-        const [f2, r2, f3, r3, catRows] = await Promise.all([
+        // 1. Ejecución escalonada: Primero Empresa 02 + Catálogo Maestro desde caché
+        const [f2, r2, catalogoMaestro] = await Promise.all([
             db.query(qF2.sql, qF2.params),
             db.query(qR2.sql, qR2.params),
-            db3.query(qF3.sql, qF3.params),
-            db3.query(qR3.sql, qR3.params),
-            qCat ? db.query(qCat.sql, qCat.params) : Promise.resolve([])
+            hayFiltroProducto ? obtenerCatalogoMaestroCacheado() : Promise.resolve([])
         ]);
 
-        const setClavesMaestro = hayFiltroProducto
-            ? new Set(catRows.map(r => r.CVE_ART))
-            : null;
+        // 2. Ejecución de Empresa 03 (se omite únicamente si el almacén es exclusivo de Empresa 02: Durango o Querétaro)
+        let f3 = [];
+        let r3 = [];
+        if (!esSoloEmpresa02) {
+            const qF3 = buildQueryEmp3('F', '2257');
+            const qR3 = buildQueryEmp3('R', '2257');
+            [f3, r3] = await Promise.all([
+                db3.query(qF3.sql, qF3.params),
+                db3.query(qR3.sql, qR3.params)
+            ]);
+        }
+
+        // Construir Set de claves válidas del Catálogo Maestro desde la caché en memoria
+        let setClavesMaestro = null;
+        if (hayFiltroProducto) {
+            setClavesMaestro = new Set();
+            catalogoMaestro.forEach(item => {
+                if (genero && item.GENERO !== genero) return;
+                if (familia && item.FAMILIA !== familia) return;
+                if (linea && item.LINEA !== linea) return;
+                setClavesMaestro.add(item.CVE_ART);
+            });
+        }
 
         const nombresMeses = ["Ene", "Feb", "Mar", "Abr", "May", "Jun", "Jul", "Ago", "Sep", "Oct", "Nov", "Dic"];
         const anioCorto = String(anio).slice(-2);
