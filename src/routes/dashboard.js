@@ -608,6 +608,7 @@ async function obtenerCatalogoMaestroCacheado() {
     const sql = `
         SELECT
             TRIM(I.CVE_ART) AS CVE_ART,
+            TRIM(COALESCE(I.DESCR, '')) AS DESCR,
             UPPER(TRIM(COALESCE(C.CAMPLIB21, ''))) AS GENERO,
             UPPER(TRIM(COALESCE(C.CAMPLIB24, ''))) AS FAMILIA,
             UPPER(TRIM(COALESCE(I.LIN_PROD, ''))) AS LINEA
@@ -938,6 +939,235 @@ router.get('/ventas-partidas-mensual', async (req, res) => {
         console.error("Error en /api/dashboard/ventas-partidas-mensual:", error.message);
         res.status(500).json({
             error: "Error al calcular la serie mensual de ventas y partidas",
+            detalle: error.message
+        });
+    }
+});
+
+/**
+ * GET /api/dashboard/ventas-partidas-descarga
+ * Descarga todas las partidas individuales que conforman el indicador mostrado en las gráficas.
+ * Recibe exactamente los mismos parámetros que /ventas-partidas-mensual:
+ * ?almacen=&tipo_venta=&genero=&familia=&linea=&mes=&anio=
+ */
+router.get('/ventas-partidas-descarga', async (req, res) => {
+    const now = new Date();
+    const anio = parseInt(req.query.anio) || now.getFullYear();
+
+    const rawMes = req.query.mes;
+    const mesFiltro = (rawMes && String(rawMes).toUpperCase() !== 'TODOS' && parseInt(rawMes) >= 1 && parseInt(rawMes) <= 12)
+        ? parseInt(rawMes)
+        : null;
+
+    const rawAlmacen = req.query.almacen || req.query.sucursal;
+    const filtroAlmacen = (rawAlmacen && String(rawAlmacen).toUpperCase() !== 'TODOS' && String(rawAlmacen).trim() !== '')
+        ? String(rawAlmacen).trim()
+        : null;
+
+    const rawTipoVenta = req.query.tipo_venta || req.query.tipo_cliente;
+    const tipoVenta = (rawTipoVenta && String(rawTipoVenta).toUpperCase() !== 'TODOS' && String(rawTipoVenta).trim() !== '')
+        ? String(rawTipoVenta).trim().toUpperCase()
+        : null;
+
+    const genero = (req.query.genero && String(req.query.genero).toUpperCase() !== 'TODOS' && String(req.query.genero).trim() !== '')
+        ? String(req.query.genero).trim().toUpperCase()
+        : null;
+
+    const familia = (req.query.familia && String(req.query.familia).toUpperCase() !== 'TODOS' && String(req.query.familia).trim() !== '')
+        ? String(req.query.familia).trim().toUpperCase()
+        : null;
+
+    const linea = (req.query.linea && String(req.query.linea).toUpperCase() !== 'TODOS' && String(req.query.linea).trim() !== '')
+        ? String(req.query.linea).trim().toUpperCase()
+        : null;
+
+    const almUpper = filtroAlmacen ? filtroAlmacen.toUpperCase() : '';
+    const esSoloEmpresa02 = almUpper === '1' || almUpper === '7' || almUpper === 'DURANGO' || almUpper === 'QUERÉTARO' || almUpper === 'QUERETARO';
+
+    try {
+        const buildQueryDescarga = (sufijo, tipoDoc, clienteExcluido) => {
+            const tablaDoc = tipoDoc === 'F' ? `FACTF${sufijo}` : `FACTR${sufijo}`;
+            const tablaPar = tipoDoc === 'F' ? `PAR_FACTF${sufijo}` : `PAR_FACTR${sufijo}`;
+            const tablaClie = `CLIE${sufijo}`;
+
+            const where = [
+                `D.TIP_DOC = '${tipoDoc}'`,
+                `D.STATUS <> 'C'`,
+                `TRIM(D.CVE_CLPV) <> '${clienteExcluido}'`,
+                `UPPER(TRIM(P.CVE_ART)) <> 'ENVIO'`,
+                `EXTRACT(YEAR FROM D.FECHA_DOC) = ?`
+            ];
+            const params = [anio];
+
+            if (tipoDoc === 'R') {
+                where.push(`(COALESCE(D.TIP_DOC_SIG, '') <> 'F')`);
+            }
+
+            if (mesFiltro) {
+                where.push(`EXTRACT(MONTH FROM D.FECHA_DOC) = ?`);
+                params.push(mesFiltro);
+            }
+
+            if (tipoVenta === 'CREDITO' || tipoVenta === 'CRÉDITO' || tipoVenta === 'S') {
+                where.push(`UPPER(TRIM(COALESCE(CL.CON_CREDITO, 'N'))) = 'S'`);
+            } else if (tipoVenta === 'CONTADO' || tipoVenta === 'N') {
+                where.push(`UPPER(TRIM(COALESCE(CL.CON_CREDITO, 'N'))) = 'N'`);
+            }
+
+            const sql = `
+                SELECT
+                    TRIM(D.CVE_DOC) AS FOLIO,
+                    D.TIP_DOC,
+                    D.FECHA_DOC,
+                    EXTRACT(MONTH FROM D.FECHA_DOC) AS MES,
+                    D.STATUS,
+                    TRIM(D.CVE_CLPV) AS CLIENTE,
+                    TRIM(COALESCE(CL.NOMBRE, '')) AS NOMBRE_CLIENTE,
+                    UPPER(TRIM(COALESCE(CL.CON_CREDITO, 'N'))) AS CON_CREDITO,
+                    D.NUM_ALMA,
+                    P.NUM_PAR,
+                    TRIM(P.CVE_ART) AS CVE_ART,
+                    P.CANT,
+                    P.PREC,
+                    COALESCE(P.DESC1, 0) AS DESC1,
+                    COALESCE(P.DESC2, 0) AS DESC2,
+                    COALESCE(P.DESC3, 0) AS DESC3,
+                    P.TOT_PARTIDA,
+                    COALESCE(P.TOTIMP4, 0) AS TOTIMP4
+                FROM ${tablaDoc} D
+                INNER JOIN ${tablaPar} P ON D.CVE_DOC = P.CVE_DOC
+                LEFT JOIN ${tablaClie} CL ON D.CVE_CLPV = CL.CLAVE
+                WHERE ${where.join(' AND ')}
+                ORDER BY D.FECHA_DOC ASC, D.CVE_DOC ASC, P.NUM_PAR ASC
+            `;
+
+            return { sql, params };
+        };
+
+        const qF2 = buildQueryDescarga('02', 'F', '4239');
+        const qR2 = buildQueryDescarga('02', 'R', '4239');
+
+        // 1. Ejecución escalonada: Primero Empresa 02 + Catálogo Maestro desde caché
+        const [f2, r2, catalogoMaestro] = await Promise.all([
+            db.query(qF2.sql, qF2.params),
+            db.query(qR2.sql, qR2.params),
+            obtenerCatalogoMaestroCacheado()
+        ]);
+
+        // 2. Ejecución de Empresa 03 (se omite únicamente si el almacén es Durango o Querétaro)
+        let f3 = [];
+        let r3 = [];
+        if (!esSoloEmpresa02) {
+            const qF3 = buildQueryDescarga('03', 'F', '2257');
+            const qR3 = buildQueryDescarga('03', 'R', '2257');
+            [f3, r3] = await Promise.all([
+                db3.query(qF3.sql, qF3.params),
+                db3.query(qR3.sql, qR3.params)
+            ]);
+        }
+
+        // Mapa del Catálogo Maestro (Empresa 02) por CVE_ART para enriquecer y filtrar ambas empresas por igual
+        const catalogoMap = new Map();
+        catalogoMaestro.forEach(item => {
+            catalogoMap.set(item.CVE_ART, item);
+        });
+
+        const pasaFiltroAlmacen = (idSucursalMapeado) => {
+            const nombreSucursal = ALMACENES_MAP[idSucursalMapeado];
+            if (!nombreSucursal) return false;
+            if (!filtroAlmacen) return true;
+
+            const targetId = filtroAlmacen === '3' ? '10' : filtroAlmacen;
+            return (
+                String(idSucursalMapeado) === targetId ||
+                nombreSucursal.toUpperCase() === filtroAlmacen.toUpperCase()
+            );
+        };
+
+        const pasaFiltroProducto = (catInfo) => {
+            if (!genero && !familia && !linea) return true;
+            if (!catInfo) return false;
+            if (genero && catInfo.GENERO !== genero) return false;
+            if (familia && catInfo.FAMILIA !== familia) return false;
+            if (linea && catInfo.LINEA !== linea) return false;
+            return true;
+        };
+
+        const partidas = [];
+
+        const agregarPartida = (row, empresa, idSucursalMapeado) => {
+            if (!pasaFiltroAlmacen(idSucursalMapeado)) return;
+
+            const catInfo = catalogoMap.get(row.CVE_ART) || null;
+            if (!pasaFiltroProducto(catInfo)) return;
+
+            partidas.push({
+                empresa,
+                tipo_doc: row.TIP_DOC ? row.TIP_DOC.trim() : '',
+                folio: row.FOLIO,
+                fecha: row.FECHA_DOC,
+                mes: parseInt(row.MES, 10),
+                anio,
+                status: row.STATUS ? row.STATUS.trim() : '',
+                cliente: row.CLIENTE,
+                nombre_cliente: row.NOMBRE_CLIENTE,
+                tipo_venta: row.CON_CREDITO === 'S' ? 'CREDITO' : 'CONTADO',
+                num_alma: row.NUM_ALMA,
+                id_sucursal: parseInt(idSucursalMapeado, 10),
+                sucursal: ALMACENES_MAP[idSucursalMapeado],
+                num_par: row.NUM_PAR,
+                CVE_ART: row.CVE_ART,
+                cve_art: row.CVE_ART,
+                descripcion: catInfo ? catInfo.DESCR : '',
+                genero: catInfo ? catInfo.GENERO : '',
+                familia: catInfo ? catInfo.FAMILIA : '',
+                linea: catInfo ? catInfo.LINEA : '',
+                cantidad: row.CANT || 0,
+                precio_unitario: round2(row.PREC || 0),
+                desc1: row.DESC1 || 0,
+                desc2: row.DESC2 || 0,
+                desc3: row.DESC3 || 0,
+                subtotal_partida: round2(row.TOT_PARTIDA || 0),
+                iva_partida: round2(row.TOTIMP4 || 0)
+            });
+        };
+
+        // Procesar Empresa 02
+        [...f2, ...r2].forEach(row => {
+            const idSuc = String(row.NUM_ALMA);
+            agregarPartida(row, 'Empresa 02', idSuc);
+        });
+
+        // Procesar Empresa 03 (mapeando almacén 3 -> 10 para Fresnillo)
+        [...f3, ...r3].forEach(row => {
+            const idSuc = String(row.NUM_ALMA) === '3' ? '10' : String(row.NUM_ALMA);
+            agregarPartida(row, 'Empresa 03', idSuc);
+        });
+
+        let subtotalTotal = 0;
+        partidas.forEach(p => {
+            subtotalTotal += p.subtotal_partida;
+        });
+
+        res.json({
+            filtros_aplicados: {
+                almacen: filtroAlmacen || 'TODOS',
+                tipo_venta: tipoVenta || 'TODOS',
+                genero: genero || 'TODOS',
+                familia: familia || 'TODOS',
+                linea: linea || 'TODOS',
+                mes: mesFiltro || 'TODOS',
+                anio
+            },
+            total_partidas: partidas.length,
+            subtotal_total: round2(subtotalTotal),
+            partidas
+        });
+
+    } catch (error) {
+        console.error("Error en /api/dashboard/ventas-partidas-descarga:", error.message);
+        res.status(500).json({
+            error: "Error al descargar el detalle de partidas filtradas",
             detalle: error.message
         });
     }
