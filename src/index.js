@@ -13,6 +13,7 @@ const rutasInventarios = require('./routes/inventarios');
 const rutasDashboardInventarios = require('./routes/dashboardInventarios');
 const rutasClientes = require('./routes/clientes');
 const rutasDashboardCompras = require('./routes/dashboardCompras');
+const rutasCompras = require('./routes/compras');
 
 const app = express();
 const port = process.env.API_PORT || 3010;
@@ -82,6 +83,8 @@ app.use('/api/dashboard-inventarios', rutasDashboardInventarios);
 app.use('/api/clientes', rutasClientes);
 
 app.use('/api/dashboard-compras', rutasDashboardCompras);
+
+app.use('/api/compras', rutasCompras);
 
 // Constantes de mapeo de almacenes (Sucursales)
 const ALMACENES = {
