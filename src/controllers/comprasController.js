@@ -138,9 +138,19 @@ const getDatosSaeReposicion = async (req, res) => {
             });
         }
 
+        const tInicioTotal = Date.now();
+        const tiempos = {};
+        const medir = async (etiqueta, fn) => {
+            const t0 = Date.now();
+            const resFn = await fn();
+            const ms = Date.now() - t0;
+            tiempos[etiqueta] = `${ms} ms (${resFn.length} filas)`;
+            return resFn;
+        };
+
         // 1. Obtener catálogo activo de ambas empresas (ejecución escalonada db -> db3 para cuidar el puerto 3050)
-        const productosEmp02 = await repo.obtenerProductosEmpresa02(lineasLimpias);
-        const productosEmp03 = await repo.obtenerProductosEmpresa03(lineasLimpias);
+        const productosEmp02 = await medir('INVE02', () => repo.obtenerProductosEmpresa02(lineasLimpias));
+        const productosEmp03 = await medir('INVE03', () => repo.obtenerProductosEmpresa03(lineasLimpias));
 
         // Unificar por CVE_ART: Empresa 02 funge como catálogo maestro; Empresa 03 complementa si hubiera SKUs exclusivos
         const inve02Map = new Map();
@@ -173,7 +183,7 @@ const getDatosSaeReposicion = async (req, res) => {
         // Completar info de INVE03 (ULT_COSTO, FCH_ULTCOM) para SKUs que existan en 02 pero tuvieran distinta línea en 03
         const skusFaltantesInve03 = allSkus.filter(sku => !inve03Map.has(sku));
         if (skusFaltantesInve03.length > 0) {
-            const extraInve03 = await repo.obtenerInve03PorClaves(skusFaltantesInve03);
+            const extraInve03 = await medir('INVE03_extra', () => repo.obtenerInve03PorClaves(skusFaltantesInve03));
             extraInve03.forEach(row => inve03Map.set(row.CVE_ART, row));
         }
 
@@ -184,23 +194,23 @@ const getDatosSaeReposicion = async (req, res) => {
 
         // 2. Consultas escalonadas por pares (1 en db + 1 en db3) para no saturar Firebird
         const [exist02Rows, exist03Rows] = await Promise.all([
-            repo.obtenerExistenciasEmp02(allSkus),
-            repo.obtenerExistenciasEmp03(allSkus)
+            medir('MULT02', () => repo.obtenerExistenciasEmp02(allSkus)),
+            medir('MULT03', () => repo.obtenerExistenciasEmp03(allSkus))
         ]);
 
         const [minve02Rows, minve03Rows] = await Promise.all([
-            repo.obtenerUltimasComprasMinve(db, 'MINVE02', allSkus),
-            repo.obtenerUltimasComprasMinve(db3, 'MINVE03', allSkus)
+            medir('MINVE02', () => repo.obtenerUltimasComprasMinve(db, 'MINVE02', allSkus)),
+            medir('MINVE03', () => repo.obtenerUltimasComprasMinve(db3, 'MINVE03', allSkus))
         ]);
 
         const [ventasF02Rows, ventasF03Rows] = await Promise.all([
-            repo.obtenerMaxFechaVentas(db, 'FACTF02', 'PAR_FACTF02', 'F', [1, 5, 6, 7], fechaCorteStr, allSkus),
-            repo.obtenerMaxFechaVentas(db3, 'FACTF03', 'PAR_FACTF03', 'F', [3, 5, 6], fechaCorteStr, allSkus)
+            medir('FACTF02', () => repo.obtenerMaxFechaVentas(db, 'FACTF02', 'PAR_FACTF02', 'F', [1, 5, 6, 7], fechaCorteStr, allSkus)),
+            medir('FACTF03', () => repo.obtenerMaxFechaVentas(db3, 'FACTF03', 'PAR_FACTF03', 'F', [3, 5, 6], fechaCorteStr, allSkus))
         ]);
 
         const [ventasR02Rows, ventasR03Rows] = await Promise.all([
-            repo.obtenerMaxFechaVentas(db, 'FACTR02', 'PAR_FACTR02', 'R', [1, 5, 6, 7], fechaCorteStr, allSkus),
-            repo.obtenerMaxFechaVentas(db3, 'FACTR03', 'PAR_FACTR03', 'R', [3, 5, 6], fechaCorteStr, allSkus)
+            medir('FACTR02', () => repo.obtenerMaxFechaVentas(db, 'FACTR02', 'PAR_FACTR02', 'R', [1, 5, 6, 7], fechaCorteStr, allSkus)),
+            medir('FACTR03', () => repo.obtenerMaxFechaVentas(db3, 'FACTR03', 'PAR_FACTR03', 'R', [3, 5, 6], fechaCorteStr, allSkus))
         ]);
 
         // 3. Indexar existencias en memoria
@@ -285,6 +295,8 @@ const getDatosSaeReposicion = async (req, res) => {
                 ultimas_ventas: ventasMap.get(sku) || { '1': null, '3': null, '5': null, '6': null, '7': null }
             };
         });
+
+        console.log(`[datos-sae] SKUs: ${productos.length} | Lineas: ${lineasLimpias.length} | Total: ${Date.now() - tInicioTotal} ms`, tiempos);
 
         return res.json({
             ok: true,
